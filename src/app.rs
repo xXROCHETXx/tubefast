@@ -13,7 +13,6 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -230,7 +229,6 @@ pub struct App {
     home_parts: Vec<(usize, Vec<Section>)>,
     home_load: u64,
     geometry: Option<String>,
-    cancel_sign_in: Arc<AtomicBool>,
     cover_queue: Vec<String>,
     cover_tried: HashSet<String>,
     cover_lookups: usize,
@@ -299,7 +297,6 @@ impl App {
             home_parts: Vec::new(),
             home_load: 0,
             geometry: cc.storage.and_then(|storage| storage.get_string(WINDOW_KEY)),
-            cancel_sign_in: Arc::default(),
             cover_queue: Vec::new(),
             cover_tried: HashSet::new(),
             cover_lookups: 0,
@@ -865,16 +862,14 @@ impl App {
             }
             Action::OpenSignIn => self.sign_in = Some(SignIn::default()),
             Action::CloseSignIn => {
-                self.cancel_sign_in.store(true, Relaxed);
                 self.sign_in = None;
             }
             Action::BrowserSignIn => {
-                self.cancel_sign_in.store(true, Relaxed);
-                self.cancel_sign_in = Arc::default();
-                let cancel = self.cancel_sign_in.clone();
-                self.start_sign_in("Finish signing in in the browser window. It closes by itself.", move || {
-                    auth::browser_sign_in(&cancel)
-                });
+                self.ctx.open_url(egui::OpenUrl::new_tab(auth::ORIGIN));
+                if let Some(sign_in) = &mut self.sign_in {
+                    sign_in.status =
+                        "Sign in to YouTube Music in your browser, then paste the cookie below to connect your account.".to_owned();
+                }
             }
             Action::CookieSignIn => {
                 let pasted = self.sign_in.as_ref().map(|sign_in| sign_in.cookie.clone()).unwrap_or_default();

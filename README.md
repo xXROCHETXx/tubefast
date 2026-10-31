@@ -8,6 +8,7 @@ Fork de [yigitbozyaka/tubefast](https://github.com/yigitbozyaka/tubefast) con un
 - La información acompaña al stream en caché y se reinicia al cambiar de pista; una precarga no sustituye las estadísticas del audio actual.
 - El formato reproducido sigue siendo el AAC itag 140 del original. Este fork no agrega selección ni desbloqueo de calidad. El indicador compara bitrate entre AAC de la respuesta recibida, no entre códecs distintos ni contra todo el catálogo de YouTube. El endpoint de reproducción del original consulta sin cookies incluso con una cuenta conectada: no puede certificar la máxima calidad Premium.
 - Usa el nombre **Tubefast Stats** y datos separados (`tubefast-stats`) para convivir con el original. El actualizador apunta a este fork.
+- **Inicio de sesión actualizado:** abre YouTube Music en el navegador predeterminado del sistema. Para conectar la cuenta a Tubefast, inicia sesión allí y pega la cookie en el diálogo de la app. No abre perfiles especiales ni puertos de depuración; abrir la página por sí solo no conecta la cuenta automáticamente.
 
 Revisión de autenticación y límites: [AUTH-REVIEW.es.md](AUTH-REVIEW.es.md).
 
@@ -118,10 +119,14 @@ Windows and macOS are the platforms it is used on most. On macOS and Linux the s
 
 ## Signing in
 
-Everything except your personal feed and your playlists works without an account. To sign in, click **Sign in** at the bottom of the sidebar and pick one of two ways:
+Everything except your personal feed and your playlists works without an account. To connect your account, click **Sign in** at the bottom of the sidebar:
 
-- **Continue in browser** opens a separate Edge or Chrome window. Sign in to Google there and the window closes by itself.
-- **Paste your cookie** if the browser window is refused by Google. The dialog lists the three steps.
+- **Open my browser** opens YouTube Music through the system's default browser, using your normal browser window and session.
+- Sign in there, then **paste your cookie** into Tubefast and choose **Use this cookie**. The dialog explains how to copy the request header from your browser's developer tools. You can paste an existing YouTube Music cookie directly if you are already signed in.
+
+Opening the page does not transfer your session automatically. This fork no longer launches a dedicated browser profile or reads browser cookies through a debugging port. The browser stays under your control, including when you close the Tubefast dialog.
+
+If Google offers a passkey from another device, you can scan its QR with an iPhone and confirm with Face ID. Google manages that browser sign-in; connecting Tubefast still requires the cookie step above. See [Google's passkey guide](https://support.google.com/accounts/answer/13548313).
 
 Your session never leaves your computer. It is stored in your user profile, encrypted with your Windows account (DPAPI) or, on macOS and Linux, in a file only your user can read, and is sent only to YouTube. Sign out removes it.
 

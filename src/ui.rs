@@ -1890,23 +1890,23 @@ fn sign_in_dialog(app: &mut App, ctx: &egui::Context, out: &mut Vec<Action>) {
             ui.add_space(24.0);
 
             let (row, _) = ui.allocate_exact_size(vec2(width, 42.0), Sense::hover());
-            if pill(ui, row.min, Id::new("sign-in-browser"), icon::GLOBE, "Continue in browser", true).clicked() && !sign_in.busy {
+            if pill(ui, row.min, Id::new("sign-in-browser"), icon::GLOBE, "Open my browser", true).clicked() && !sign_in.busy {
                 out.push(Action::BrowserSignIn);
             }
             ui.add_space(12.0);
             paragraph(
                 ui,
-                "Opens a separate Edge or Chrome window. Sign in to Google there and it closes by itself.",
+                "Opens YouTube Music in your default browser. After signing in, paste your session cookie below to connect Tubefast.",
                 sans(13.0),
                 MUTED,
                 3,
             );
             ui.add_space(22.0);
 
-            eyebrow(ui, "Or paste your cookie", 0.0);
+            eyebrow(ui, "Connect your session", 0.0);
             let steps = [
                 "1.  Open music.youtube.com in your browser and sign in.",
-                "2.  Press F12, open Network and click a request to music.youtube.com.",
+                "2.  Open Developer Tools, select Network and choose a request to music.youtube.com.",
                 "3.  Copy the whole cookie value under Request Headers and paste it here.",
             ];
             for step in steps {

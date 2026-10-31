@@ -26,7 +26,7 @@ cargo clippy --all-targets -- -D warnings
 cargo test
 ```
 
-`cargo test -- --include-ignored` also drives the sign-in flow through a real headless Edge or Chrome.
+Account connection opens the system's default browser and accepts an explicitly pasted YouTube Music cookie. Tests use synthetic cookies; never capture or publish real session headers in test fixtures or logs.
 
 ## Branches and pull requests
 
