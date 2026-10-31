@@ -3225,6 +3225,7 @@ name = "tubefast"
 version = "0.5.0"
 dependencies = [
  "async-channel",
+ "base64",
  "block2 0.6.2",
  "eframe",
  "egui-phosphor",
@@ -3243,6 +3244,7 @@ dependencies = [
  "serde_json",
  "symphonia",
  "ureq",
+ "url",
  "windows 0.61.3",
  "windows-sys 0.61.2",
  "winresource",

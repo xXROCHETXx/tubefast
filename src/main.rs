@@ -4,12 +4,13 @@ mod app;
 mod art;
 mod auth;
 mod discord;
-mod extension_login;
 mod media;
+mod oauth;
 mod player;
 mod stats;
 mod ui;
 mod update;
+mod youtube_account;
 mod ytm;
 
 use eframe::egui;

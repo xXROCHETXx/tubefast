@@ -65,6 +65,7 @@ pub struct Saved {
     pub volume: f32,
     pub liked: Vec<Item>,
     pub signed_out_liked: Option<Vec<Item>>,
+    pub oauth_likes: HashMap<String, LocalLikes>,
     pub recent: Vec<Item>,
     pub pinned: Vec<Item>,
     pub visitor: String,
@@ -126,12 +127,40 @@ pub struct SignIn {
     pub status: String,
 }
 
+#[derive(Default, Serialize, Deserialize)]
+pub struct LocalLikes {
+    added: Vec<Item>,
+    removed: HashSet<String>,
+}
+
+impl LocalLikes {
+    fn set(&mut self, item: Item, liked: bool) {
+        self.added.retain(|known| known.key() != item.key());
+        if liked {
+            self.removed.remove(item.key());
+            self.added.push(item);
+        } else {
+            self.removed.insert(item.key().to_owned());
+        }
+    }
+
+    fn merge(&self, items: &mut Vec<Item>) {
+        items.retain(|item| !self.removed.contains(item.key()));
+        for item in &self.added {
+            if !items.iter().any(|known| known.key() == item.key()) {
+                items.insert(0, item.clone());
+            }
+        }
+    }
+}
+
 impl Default for Saved {
     fn default() -> Self {
         Self {
             volume: 0.8,
             liked: Vec::new(),
             signed_out_liked: None,
+            oauth_likes: HashMap::new(),
             recent: Vec::new(),
             pinned: Vec::new(),
             visitor: String::new(),
@@ -210,9 +239,9 @@ enum Event {
         generation: u64,
         result: Result<(Account, String), String>,
     },
-    SignInBrowser(u64),
-    Library(Vec<Item>),
-    Liked(Vec<Item>),
+    SignInBrowser(u64, String),
+    Library(u64, Result<Vec<Item>, String>),
+    Liked(u64, Result<Vec<Item>, String>),
     LikeRejected(Item, String),
     Cover(String, Option<String>),
     Release(String),
@@ -416,8 +445,9 @@ impl App {
 
     fn load_library(&self) {
         if self.yt.signed_in() {
-            self.background(|yt| yt.library().ok().map(Event::Library));
-            self.background(|yt| yt.liked().ok().map(Event::Liked));
+            let generation = self.sign_in_generation;
+            self.background(move |yt| Some(Event::Library(generation, yt.library())));
+            self.background(move |yt| Some(Event::Liked(generation, yt.liked())));
         }
     }
 
@@ -439,19 +469,16 @@ impl App {
         let cancel = self.cancel_sign_in.clone();
         if let Some(sign_in) = &mut self.sign_in {
             sign_in.busy = true;
-            sign_in.status = "Open Tubefast Connect in your browser and click Connect to use your current YouTube session.".to_owned();
+            sign_in.status = "Continue in your browser. After you approve Google access, return here.".to_owned();
         }
         self.sign_in_workers.retain(|worker| !worker.is_finished());
         let (yt, sender, ctx) = (self.yt.clone(), self.sender.clone(), self.ctx.clone());
         self.sign_in_workers.push(std::thread::spawn(move || {
-            let signed = crate::extension_login::sign_in(
-                &cancel,
-                || {
-                    let _ = sender.send(Event::SignInBrowser(generation));
-                    ctx.request_repaint();
-                },
-                |cookie| yt.verify_session(cookie),
-            );
+            let signed = crate::oauth::sign_in(&cancel, |url| {
+                let _ = sender.send(Event::SignInBrowser(generation, url));
+                ctx.request_repaint();
+            })
+            .and_then(|credential| yt.verify_session(&credential).map(|account| (account, credential)));
             let _ = sender.send(Event::SignedIn {
                 generation,
                 result: signed,
@@ -461,6 +488,8 @@ impl App {
     }
 
     fn sign_out(&mut self) {
+        self.cancel_sign_in.store(true, Relaxed);
+        self.sign_in_generation += 1;
         self.yt.set_session(None);
         auth::forget();
         self.saved.leave_account();
@@ -501,7 +530,7 @@ impl App {
         }
         self.pages.insert(route.clone(), Load::Loading);
         let mut seeds: Vec<Item> = Vec::new();
-        let wanted = if self.yt.signed_in() { 0 } else { HOME_SEEDS };
+        let wanted = if self.yt.personal_music() { 0 } else { HOME_SEEDS };
         for item in self.saved.recent.iter().chain(&self.saved.liked) {
             if seeds.len() < wanted && !seeds.iter().any(|seed| seed.subtitle == item.subtitle) {
                 seeds.push(item.clone());
@@ -670,12 +699,25 @@ impl App {
                     }
                 }
                 Event::Radio(..) => {}
-                Event::Library(items) => self.library = items,
-                Event::Liked(items) if self.yt.signed_in() => {
+                Event::Library(generation, Ok(items)) if generation == self.sign_in_generation && self.yt.signed_in() => {
+                    self.library = items
+                }
+                Event::Library(generation, Err(message)) | Event::Liked(generation, Err(message))
+                    if generation == self.sign_in_generation && self.yt.signed_in() =>
+                {
+                    self.notify(message)
+                }
+                Event::Library(..) => {}
+                Event::Liked(generation, Ok(mut items)) if generation == self.sign_in_generation && self.yt.signed_in() => {
+                    if self.yt.oauth_account()
+                        && let Some(local) = self.saved.account.as_ref().and_then(|a| self.saved.oauth_likes.get(&a.id))
+                    {
+                        local.merge(&mut items);
+                    }
                     let shown = std::mem::replace(&mut self.saved.liked, items);
                     self.saved.signed_out_liked.get_or_insert(shown);
                 }
-                Event::Liked(_) => {}
+                Event::Liked(..) => {}
                 Event::LikeRejected(item, message) => {
                     if self.yt.signed_in() {
                         toggle(&mut self.saved.liked, item);
@@ -709,10 +751,10 @@ impl App {
                     }
                 },
                 Event::SignedIn { .. } => {}
-                Event::SignInBrowser(generation) if generation == self.sign_in_generation && self.sign_in.is_some() => {
-                    ctx.open_url(egui::OpenUrl::new_tab(auth::ORIGIN));
+                Event::SignInBrowser(generation, url) if generation == self.sign_in_generation && self.sign_in.is_some() => {
+                    ctx.open_url(egui::OpenUrl::new_tab(url));
                 }
-                Event::SignInBrowser(_) => {}
+                Event::SignInBrowser(..) => {}
                 Event::Pressed(action) => self.apply(action),
                 Event::Discord(linked) => self.discord_linked = Some(linked),
                 Event::Lyrics(video_id, found) => {
@@ -874,7 +916,17 @@ impl App {
             Action::Like(item) => {
                 let liked = !self.saved.liked.iter().any(|known| known.key() == item.key());
                 toggle(&mut self.saved.liked, item.clone());
-                if self.yt.signed_in() && item.is_song() {
+                if self.yt.oauth_account() {
+                    if let Some(account) = self.saved.account.as_ref().filter(|a| !a.id.is_empty()) {
+                        self.saved
+                            .oauth_likes
+                            .entry(account.id.clone())
+                            .or_default()
+                            .set(item.clone(), liked);
+                    }
+                    self.notify("Saved locally. Google access is read-only.");
+                }
+                if self.yt.personal_music() && item.is_song() {
                     self.background(move |yt| {
                         let problem = yt.rate(&item.video_id, liked).err()?;
                         Some(Event::LikeRejected(item, format!("Like not saved. {problem}")))
@@ -1089,6 +1141,25 @@ fn shuffle(items: &mut [Item]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn read_only_account_favorites_survive_reimport_and_restart() {
+        let song = |id: &str| Item {
+            video_id: id.to_owned(),
+            ..Item::default()
+        };
+        let mut local = LocalLikes::default();
+        local.set(song("cloud"), false);
+        local.set(song("local"), true);
+        let serialized = serde_json::to_string(&local).unwrap();
+        let mut local: LocalLikes = serde_json::from_str(&serialized).unwrap();
+        let mut imported = vec![song("cloud"), song("other")];
+        local.merge(&mut imported);
+        assert_eq!(imported.iter().map(Item::key).collect::<Vec<_>>(), ["local", "other"]);
+        local.set(song("cloud"), true);
+        local.merge(&mut imported);
+        assert_eq!(imported.iter().filter(|i| i.key() == "cloud").count(), 1);
+    }
 
     #[test]
     fn offers_only_releases_newer_than_this_build() {

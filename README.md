@@ -8,7 +8,7 @@ Fork de [yigitbozyaka/tubefast](https://github.com/yigitbozyaka/tubefast) con un
 - La información acompaña al stream en caché y se reinicia al cambiar de pista; una precarga no sustituye las estadísticas del audio actual.
 - El formato reproducido sigue siendo el AAC itag 140 del original. Este fork no agrega selección ni desbloqueo de calidad. El indicador compara bitrate entre AAC de la respuesta recibida, no entre códecs distintos ni contra todo el catálogo de YouTube. El endpoint de reproducción del original consulta sin cookies incluso con una cuenta conectada: no puede certificar la máxima calidad Premium.
 - Usa el nombre **Tubefast Stats** y datos separados (`tubefast-stats`) para convivir con el original. El actualizador apunta a este fork.
-- **Conexión con tu sesión actual:** el panel vuelve a su presentación original. Pulsa **Continue in browser** y después **Conectar** en Tubefast Connect para usar la sesión de YouTube de tu Edge/Chrome habitual. Se requiere instalar la [extensión de desarrollo](browser-extension/README.md) una vez; todavía no está publicada en una tienda. La app valida y guarda la sesión sin copiar cookies ni abrir un navegador controlado.
+- **Acceso con Google OAuth:** conserva el panel original y abre el navegador predeterminado desde **Continue in browser**. La API oficial permite importar tus playlists propias y vídeos con Me gusta. No requiere extensiones ni copiar cookies. **El propietario del fork debe registrar el cliente OAuth antes de activar el acceso:** [configuración y límites](OAUTH.es.md). Esta integración no proporciona el inicio personalizado ni toda la biblioteca de YouTube Music; los nuevos favoritos se guardan localmente.
 
 Revisión de autenticación y límites: [AUTH-REVIEW.es.md](AUTH-REVIEW.es.md).
 
@@ -59,7 +59,7 @@ Numbers are from the release build on Windows 11. Memory is the working set a fe
 | **Updates itself** | When a new version is out, Tubefast tells you and installs it with one click, then restarts with your queue where it was. |
 | **Media keys** | Play, pause, next and previous keys work from any window, and the track shows up in the Windows media overlay in Now Playing on macOS and in the Linux desktop's media controls (MPRIS), with its cover and progress. |
 | **Discord status** | Turn on **Show on Discord** under the gear at the bottom of the sidebar and your Discord profile shows the song you are listening to, with its artist, cover and progress. The same menu picks what the short status next to your name says: Tubefast, the artist, the song or a text of your own. It is off until you turn it on. |
-| **A home feed that knows you** | Signed out, the feed is built from what you played here. Signed in, you get your own YouTube Music feed and playlists. |
+| **A home feed that knows you** | The OAuth build uses the local listening history for its feed. Official YouTube playlists and liked videos are imported into the library. The full YouTube Music personal feed is not exposed by this API. |
 | **Your library, kept locally** | Liked songs, listening history and saved albums, playlists and artists live on your computer. |
 | **Real covers** | Music videos show the album cover of the song instead of a video frame whenever YouTube knows which song it is. |
 | **Keyboard first** | Shortcuts for everything that matters, plus accessible names on every control for screen readers. |
@@ -119,17 +119,17 @@ Windows and macOS are the platforms it is used on most. On macOS and Linux the s
 
 ## Signing in
 
-Everything except your personal feed and your playlists works without an account. To connect your account, click **Sign in** at the bottom of the sidebar:
+Search and playback work without an account. Once the fork owner configures its Google Cloud Desktop OAuth client, click **Sign in** at the bottom of the sidebar:
 
-- Install [Tubefast Connect](browser-extension/README.md) once in the Edge/Chrome profile where you already use YouTube Music.
-- Choose **Continue in browser**, then open **Tubefast Connect** from the browser toolbar and click **Conectar con Tubefast**.
-- Tubefast verifies the current YouTube session and connects your library. Closing the dialog cancels the pending connection; a result from an old attempt cannot connect another account.
+- Choose **Continue in browser**. Google opens in the system's default browser, where you select an account and grant YouTube read access.
+- Return to Tubefast: the authorization completes automatically through a temporary localhost callback. Closing the dialog cancels the connection; an old attempt cannot connect another account.
+- Your own YouTube playlists, including private ones, and your most recent liked videos are imported through the official Data API. Likes changed in Tubefast are local and survive reloading. The API does not expose the complete Music library or personalized Music feed.
 
-No cookie copying is needed. The extension uses the browser's cookies API with explicit YouTube permission and sends the session only to the local app for the pending connection. There is no controlled sign-in browser or debugging port. This development extension is not yet available in a browser store; see its README for initial installation and distribution requirements. See the [authentication review](AUTH-REVIEW.es.md) for verification and security limits.
+No extension, cookie copying, browser debugging port or controlled browser is used. See [OAuth setup](OAUTH.es.md) for the one-time publisher configuration and Google verification requirements. Builds without a configured client show an explicit setup error instead of pretending to connect. See the [authentication review](AUTH-REVIEW.es.md) for verification and security limits.
 
-If you are not signed in, access YouTube Music normally in your browser first. Google may offer a passkey from your iPhone; Tubefast does not create its own Google QR code.
+Google may offer a passkey from your iPhone; Tubefast does not create its own Google QR code.
 
-Your session is stored in your user profile, encrypted with your Windows account (DPAPI) or, on macOS and Linux, in a file created with user-only permissions. It is sent to YouTube to authenticate requests. Sign out removes the local copy.
+OAuth access and refresh tokens are stored in your user profile, encrypted with your Windows account (DPAPI) or, on macOS and Linux, in a file created with user-only permissions. Tokens go only to Google's fixed HTTPS token and YouTube Data API endpoints. Sign out removes the local token copy; revoke the grant from your Google account to remove Google's authorization as well. Existing cookie sessions remain readable for compatibility, but the app no longer imports browser cookies.
 
 ## Shortcuts
 

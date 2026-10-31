@@ -1886,7 +1886,7 @@ fn sign_in_dialog(app: &mut App, ctx: &egui::Context, out: &mut Vec<Action>) {
             let slot = Rect::from_center_size(pos2(head.right() - 16.0, head.center().y), Vec2::splat(34.0));
             let closed = icon_button(ui, slot, Id::new("sign-in-close"), icon::X, glyph(16.0), MUTED, "Close").clicked();
             ui.add_space(8.0);
-            paragraph(ui, "Your library and playlists from YouTube Music.", sans(14.0), MUTED, 2);
+            paragraph(ui, "Your YouTube playlists and liked videos.", sans(14.0), MUTED, 2);
             ui.add_space(24.0);
 
             let (row, _) = ui.allocate_exact_size(vec2(width, 42.0), Sense::hover());
@@ -1896,7 +1896,7 @@ fn sign_in_dialog(app: &mut App, ctx: &egui::Context, out: &mut Vec<Action>) {
             ui.add_space(12.0);
             paragraph(
                 ui,
-                "Use your current YouTube session with the Tubefast Connect browser extension.",
+                "Sign in with Google in your usual browser. Your playlists and liked videos are read-only; new likes stay on this computer.",
                 sans(13.0),
                 MUTED,
                 3,

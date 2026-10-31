@@ -142,6 +142,8 @@ pub struct Lyrics {
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Account {
+    #[serde(default)]
+    pub id: String,
     pub name: String,
     pub photo: String,
 }
@@ -175,6 +177,7 @@ pub struct Client {
     pub agent: ureq::Agent,
     visitor: Mutex<String>,
     session: Mutex<Option<String>>,
+    oauth_refresh: Mutex<()>,
     expired: AtomicBool,
     clients: Mutex<Clients>,
     clients_checked: Mutex<Option<Instant>>,
@@ -191,6 +194,7 @@ impl Client {
             agent,
             visitor: Mutex::new(visitor),
             session: Mutex::new(None),
+            oauth_refresh: Mutex::new(()),
             expired: AtomicBool::new(false),
             clients: Mutex::new(Clients::parse(BUNDLED_CLIENTS).expect("the bundled clients.json should be complete")),
             clients_checked: Mutex::new(None),
@@ -234,6 +238,90 @@ impl Client {
         self.session.lock().unwrap().is_some()
     }
 
+    pub fn oauth_account(&self) -> bool {
+        self.session
+            .lock()
+            .unwrap()
+            .as_deref()
+            .is_some_and(|s| s.starts_with(crate::oauth::PREFIX))
+    }
+
+    pub fn personal_music(&self) -> bool {
+        self.signed_in() && !self.oauth_account()
+    }
+
+    fn music_cookie(&self) -> Option<String> {
+        self.session
+            .lock()
+            .unwrap()
+            .clone()
+            .filter(|s| !s.starts_with(crate::oauth::PREFIX))
+    }
+
+    fn youtube(&self, endpoint: &str, query: &[(&str, &str)]) -> Result<Value, String> {
+        // Endpoints are selected by our adapter, never by a server response or playlist ID.
+        if !["channels", "playlists", "playlistItems", "videos"].contains(&endpoint) {
+            return Err("Unsupported account request.".to_owned());
+        }
+        let used = {
+            // Only account workers use this lock. Do not hold the session/UI lock over network I/O.
+            let _refresh = self.oauth_refresh.lock().unwrap();
+            let original = self.session.lock().unwrap().clone();
+            let mut session = original
+                .as_deref()
+                .and_then(crate::oauth::Session::parse)
+                .ok_or("Sign in with Google to open this playlist.")?;
+            if session.needs_refresh() {
+                if let Err(error) = session.refresh() {
+                    if error.rejected {
+                        self.end_session(original.as_deref().unwrap_or_default());
+                    }
+                    return Err(error.message);
+                }
+                let updated = session.encode();
+                let mut stored = self.session.lock().unwrap();
+                if *stored != original {
+                    return Err("The account changed during renewal. Try again.".to_owned());
+                }
+                // Keep the lock through persistence so sign-out cannot resurrect credentials.
+                auth::store(&updated).map_err(|_| "Could not save the renewed authorization. Check local storage permissions.")?;
+                *stored = Some(updated);
+            }
+            self.session
+                .lock()
+                .unwrap()
+                .clone()
+                .ok_or("Sign in again to access this account.")?
+        };
+        let session = crate::oauth::Session::parse(&used).ok_or("Invalid local authorization. Sign in again.")?;
+        let agent = ureq::AgentBuilder::new()
+            .redirects(0)
+            .timeout(Duration::from_secs(15))
+            .timeout_connect(Duration::from_secs(5))
+            .timeout_read(Duration::from_secs(10))
+            .build();
+        let mut request = agent
+            .get(&format!("https://www.googleapis.com/youtube/v3/{endpoint}"))
+            .set("Authorization", &format!("Bearer {}", session.access_token()));
+        for (key, value) in query {
+            request = request.query(key, value);
+        }
+        match request.call() {
+            Ok(response) => serde_json::from_reader(response.into_reader().take(2 * 1024 * 1024))
+                .map_err(|_| "YouTube returned an invalid account response.".to_owned()),
+            Err(ureq::Error::Status(401, _)) => {
+                self.end_session(&used);
+                Err("Google no longer accepts this authorization. Sign in again.".to_owned())
+            }
+            Err(ureq::Error::Status(403, _)) => Err(
+                "YouTube denied this request. Check the granted permission, API activation and quota in the fork's Google Cloud project."
+                    .to_owned(),
+            ),
+            Err(ureq::Error::Status(404, _)) => Err("This YouTube playlist or video is unavailable.".to_owned()),
+            Err(_) => Err("Could not read your YouTube account. Check your connection and try again.".to_owned()),
+        }
+    }
+
     pub fn take_expired(&self) -> bool {
         self.expired.swap(false, Relaxed)
     }
@@ -249,6 +337,20 @@ impl Client {
     }
 
     fn account(&self) -> Result<Account, String> {
+        if self.oauth_account() {
+            let mut account = crate::youtube_account::account(&|endpoint, query| self.youtube(endpoint, query))?;
+            if account.id.is_empty() {
+                account.id = self
+                    .session
+                    .lock()
+                    .unwrap()
+                    .as_deref()
+                    .and_then(crate::oauth::Session::parse)
+                    .map(|session| session.local_account_key())
+                    .unwrap_or_default();
+            }
+            return Ok(account);
+        }
         let used = self.session.lock().unwrap().clone().unwrap_or_default();
         let response = self.music("account/account_menu", json!({}), &[])?;
         let Some(header) = find(&response, "activeAccountHeaderRenderer") else {
@@ -256,6 +358,7 @@ impl Client {
             return Err(SESSION_REJECTED.to_owned());
         };
         Ok(Account {
+            id: String::new(),
             name: text(&header["accountName"]),
             photo: thumb(&header["accountPhoto"]),
         })
@@ -300,6 +403,9 @@ impl Client {
     }
 
     pub fn library(&self) -> Result<Vec<Item>, String> {
+        if self.oauth_account() {
+            return crate::youtube_account::library(&|endpoint, query| self.youtube(endpoint, query));
+        }
         let page = self.browse("FEmusic_liked_playlists")?;
         let saved: Vec<Item> = page
             .sections
@@ -334,6 +440,9 @@ impl Client {
     }
 
     pub fn liked(&self) -> Result<Vec<Item>, String> {
+        if self.oauth_account() {
+            return crate::youtube_account::liked(&|endpoint, query| self.youtube(endpoint, query));
+        }
         let mut response = self.music("browse", json!({ "browseId": LIKED_SONGS }), &[])?;
         let mut token = tracks_continuation(&response);
         let mut songs = parse_page(&response).songs();
@@ -347,12 +456,15 @@ impl Client {
     }
 
     pub fn rate(&self, video_id: &str, liked: bool) -> Result<(), String> {
+        if self.oauth_account() {
+            return Err("Google access is read-only; new likes are saved locally.".to_owned());
+        }
         let endpoint = if liked { "like/like" } else { "like/removelike" };
         self.music(endpoint, json!({ "target": { "videoId": video_id } }), &[]).map(drop)
     }
 
     pub fn home(&self, seeds: &[Item], emit: &(dyn Fn(usize, Vec<Section>) + Sync)) -> Result<(), String> {
-        let (explore_order, home_order, pages) = if self.signed_in() {
+        let (explore_order, home_order, pages) = if self.personal_music() {
             (HOME_ORDER, EXPLORE_ORDER, PERSONAL_PAGES)
         } else {
             (EXPLORE_ORDER, HOME_ORDER, 1)
@@ -397,6 +509,9 @@ impl Client {
     }
 
     pub fn browse(&self, browse_id: &str) -> Result<Page, String> {
+        if let Some(id) = browse_id.strip_prefix(crate::youtube_account::PLAYLIST_PREFIX) {
+            return crate::youtube_account::browse(&|endpoint, query| self.youtube(endpoint, query), id);
+        }
         let response = self.music("browse", json!({ "browseId": browse_id }), &[])?;
         let mut page = parse_page(&response);
         if let Some(header) = &mut page.header {
@@ -576,7 +691,7 @@ impl Client {
         for (name, value) in params {
             request = request.query(name, value);
         }
-        let cookie = self.session.lock().unwrap().clone();
+        let cookie = self.music_cookie();
         if let Some(cookie) = &cookie {
             let now = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |elapsed| elapsed.as_secs());
             let signature = auth::authorization(cookie, now).unwrap_or_default();
@@ -1143,6 +1258,22 @@ mod tests {
         assert!(!yt.signed_in() && yt.take_expired());
         yt.end_session("");
         assert!(!yt.take_expired());
+    }
+
+    #[test]
+    fn oauth_credentials_never_become_a_music_cookie() {
+        let yt = Client::new(String::new());
+        yt.set_session(Some(format!(
+            "{}{}",
+            crate::oauth::PREFIX,
+            json!({"access_token":"synthetic","refresh_token":"offline","client_id":"test.apps.googleusercontent.com","expires_at":0})
+        )));
+        assert!(yt.signed_in() && yt.oauth_account());
+        assert!(!yt.personal_music());
+        assert!(yt.music_cookie().is_none());
+        yt.set_session(Some("SAPISID=legacy".to_owned()));
+        assert!(yt.personal_music());
+        assert_eq!(yt.music_cookie().as_deref(), Some("SAPISID=legacy"));
     }
 
     #[test]
