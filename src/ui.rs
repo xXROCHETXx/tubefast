@@ -1882,69 +1882,44 @@ fn sign_in_dialog(app: &mut App, ctx: &egui::Context, out: &mut Vec<Action>) {
             let width = ui.available_width();
             let (head, _) = ui.allocate_exact_size(vec2(width, 44.0), Sense::hover());
             ui.painter()
-                .text(head.left_center(), Align2::LEFT_CENTER, "Sign in", display(38.0), TEXT);
+                .text(head.left_center(), Align2::LEFT_CENTER, "Tu cuenta", display(38.0), TEXT);
             let slot = Rect::from_center_size(pos2(head.right() - 16.0, head.center().y), Vec2::splat(34.0));
             let closed = icon_button(ui, slot, Id::new("sign-in-close"), icon::X, glyph(16.0), MUTED, "Close").clicked();
             ui.add_space(8.0);
-            paragraph(ui, "Your own home feed and playlists from YouTube Music.", sans(14.0), MUTED, 2);
+            paragraph(ui, "Conecta tu biblioteca y tus playlists de YouTube Music.", sans(14.0), MUTED, 2);
             ui.add_space(24.0);
 
             let (row, _) = ui.allocate_exact_size(vec2(width, 42.0), Sense::hover());
-            if pill(ui, row.min, Id::new("sign-in-browser"), icon::GLOBE, "Open my browser", true).clicked() && !sign_in.busy {
+            let caption = if sign_in.busy {
+                "Esperando a Google…"
+            } else {
+                "Conectar con Google"
+            };
+            if pill(ui, row.min, Id::new("sign-in-browser"), icon::GLOBE, caption, true).clicked() && !sign_in.busy {
                 out.push(Action::BrowserSignIn);
             }
-            ui.add_space(12.0);
-            paragraph(
-                ui,
-                "Opens YouTube Music in your default browser. After signing in, paste your session cookie below to connect Tubefast.",
-                sans(13.0),
-                MUTED,
-                3,
-            );
-            ui.add_space(22.0);
-
-            eyebrow(ui, "Connect your session", 0.0);
-            let steps = [
-                "1.  Open music.youtube.com in your browser and sign in.",
-                "2.  Open Developer Tools, select Network and choose a request to music.youtube.com.",
-                "3.  Copy the whole cookie value under Request Headers and paste it here.",
-            ];
-            for step in steps {
-                paragraph(ui, step, sans(13.0), MUTED, 2);
-                ui.add_space(5.0);
+            ui.add_space(20.0);
+            for (number, instruction) in [
+                ("1", "Se abre una ventana normal de Edge o Chrome."),
+                (
+                    "2",
+                    "Inicia sesión en Google. Puedes usar una clave de acceso con tu iPhone si Google te ofrece esa opción.",
+                ),
+                ("3", "Vuelve a Tubefast: tu cuenta se conecta automáticamente."),
+            ] {
+                ui.horizontal(|ui| {
+                    let (circle, _) = ui.allocate_exact_size(vec2(24.0, 24.0), Sense::hover());
+                    ui.painter().circle_filled(circle.center(), 12.0, veil(0.06));
+                    ui.painter()
+                        .text(circle.center(), Align2::CENTER_CENTER, number, medium(12.0), MUTED);
+                    ui.add_space(10.0);
+                    ui.allocate_ui_with_layout(vec2(width - 34.0, 0.0), egui::Layout::top_down(Align::Min), |ui| {
+                        ui.add(egui::Label::new(RichText::new(instruction).font(sans(13.0)).color(MUTED)).wrap());
+                    });
+                });
+                ui.add_space(12.0);
             }
-            ui.add_space(7.0);
-            let background = ui.painter().add(Shape::Noop);
-            let field = egui::ScrollArea::vertical().max_height(74.0).auto_shrink(false).show(ui, |ui| {
-                let edit = egui::TextEdit::multiline(&mut sign_in.cookie)
-                    .frame(false)
-                    .margin(Margin::same(10))
-                    .desired_width(f32::INFINITY)
-                    .desired_rows(3)
-                    .font(FontId::monospace(11.5))
-                    .text_color(TEXT)
-                    .hint_text(RichText::new("SID=...; SAPISID=...; LOGIN_INFO=...").color(FAINT));
-                ui.add(edit);
-            });
-            ui.painter().set(
-                background,
-                RectShape::new(field.inner_rect, 10.0, veil(0.06), Stroke::new(1.0, veil(0.08)), StrokeKind::Inside),
-            );
-            ui.add_space(14.0);
-            let (row, _) = ui.allocate_exact_size(vec2(width, 42.0), Sense::hover());
-            if pill(
-                ui,
-                row.min,
-                Id::new("sign-in-cookie"),
-                icon::CLIPBOARD_TEXT,
-                "Use this cookie",
-                false,
-            )
-            .clicked()
-                && !sign_in.busy
-            {
-                out.push(Action::CookieSignIn);
-            }
+            ui.add_space(4.0);
 
             if !sign_in.status.is_empty() {
                 ui.add_space(18.0);

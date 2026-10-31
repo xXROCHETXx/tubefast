@@ -13,6 +13,7 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -121,7 +122,6 @@ impl Covers {
 
 #[derive(Default)]
 pub struct SignIn {
-    pub cookie: String,
     pub busy: bool,
     pub status: String,
 }
@@ -185,7 +185,6 @@ pub enum Action {
     OpenSignIn,
     CloseSignIn,
     BrowserSignIn,
-    CookieSignIn,
     SignOut,
     Undo,
     GetUpdate,
@@ -207,7 +206,10 @@ enum Event {
     Page(Route, Result<Box<Page>, String>),
     Part(u64, usize, Vec<Section>),
     Radio(String, Vec<Item>),
-    SignedIn(Result<(Account, String), String>),
+    SignedIn {
+        generation: u64,
+        result: Result<(Account, String), String>,
+    },
     Library(Vec<Item>),
     Liked(Vec<Item>),
     LikeRejected(Item, String),
@@ -229,6 +231,9 @@ pub struct App {
     home_parts: Vec<(usize, Vec<Section>)>,
     home_load: u64,
     geometry: Option<String>,
+    sign_in_generation: u64,
+    cancel_sign_in: Arc<AtomicBool>,
+    sign_in_workers: Vec<std::thread::JoinHandle<()>>,
     cover_queue: Vec<String>,
     cover_tried: HashSet<String>,
     cover_lookups: usize,
@@ -297,6 +302,9 @@ impl App {
             home_parts: Vec::new(),
             home_load: 0,
             geometry: cc.storage.and_then(|storage| storage.get_string(WINDOW_KEY)),
+            sign_in_generation: 0,
+            cancel_sign_in: Arc::default(),
+            sign_in_workers: Vec::new(),
             cover_queue: Vec::new(),
             cover_tried: HashSet::new(),
             cover_lookups: 0,
@@ -419,15 +427,31 @@ impl App {
         self.load_library();
     }
 
-    fn start_sign_in(&mut self, status: &str, cookie: impl FnOnce() -> Result<String, String> + Send + 'static) {
+    fn start_sign_in(&mut self) {
+        if self.sign_in.as_ref().is_none_or(|sign_in| sign_in.busy) {
+            return;
+        }
+        self.cancel_sign_in.store(true, Relaxed);
+        self.cancel_sign_in = Arc::default();
+        self.sign_in_generation += 1;
+        let generation = self.sign_in_generation;
+        let cancel = self.cancel_sign_in.clone();
         if let Some(sign_in) = &mut self.sign_in {
             sign_in.busy = true;
-            sign_in.status = status.to_owned();
+            sign_in.status = "Continúa en la ventana del navegador. Al terminar, tu cuenta se conectará automáticamente.".to_owned();
         }
-        self.background(move |yt| {
-            let signed = cookie().and_then(|cookie| Ok((yt.sign_in(cookie.clone())?, cookie)));
-            Some(Event::SignedIn(signed))
-        });
+        self.sign_in_workers.retain(|worker| !worker.is_finished());
+        let (yt, sender, ctx) = (self.yt.clone(), self.sender.clone(), self.ctx.clone());
+        self.sign_in_workers.push(std::thread::spawn(move || {
+            let signed = eframe::storage_dir(crate::app_id())
+                .ok_or("No se encontró una carpeta para el acceso.".to_owned())
+                .and_then(|root| crate::browser_login::sign_in(&root, &cancel, |cookie| yt.verify_session(cookie)));
+            let _ = sender.send(Event::SignedIn {
+                generation,
+                result: signed,
+            });
+            ctx.request_repaint();
+        }));
     }
 
     fn sign_out(&mut self) {
@@ -661,21 +685,24 @@ impl App {
                         self.saved.covers.known.insert(video_id, cover);
                     }
                 }
-                Event::SignedIn(Ok((account, cookie))) if self.sign_in.is_some() => {
-                    if let Err(message) = auth::store(&cookie) {
-                        self.notify(message);
+                Event::SignedIn { generation, result } if generation == self.sign_in_generation && self.sign_in.is_some() => match result {
+                    Ok((account, cookie)) => {
+                        self.yt.set_session(Some(cookie.clone()));
+                        if let Err(message) = auth::store(&cookie) {
+                            self.notify(message);
+                        }
+                        self.saved.account = Some(account);
+                        self.sign_in = None;
+                        self.refresh();
                     }
-                    self.saved.account = Some(account);
-                    self.sign_in = None;
-                    self.refresh();
-                }
-                Event::SignedIn(Ok(_)) => self.yt.set_session(None),
-                Event::SignedIn(Err(message)) => {
-                    if let Some(sign_in) = &mut self.sign_in {
-                        sign_in.busy = false;
-                        sign_in.status = message;
+                    Err(message) => {
+                        if let Some(sign_in) = &mut self.sign_in {
+                            sign_in.busy = false;
+                            sign_in.status = message;
+                        }
                     }
-                }
+                },
+                Event::SignedIn { .. } => {}
                 Event::Pressed(action) => self.apply(action),
                 Event::Discord(linked) => self.discord_linked = Some(linked),
                 Event::Lyrics(video_id, found) => {
@@ -862,19 +889,11 @@ impl App {
             }
             Action::OpenSignIn => self.sign_in = Some(SignIn::default()),
             Action::CloseSignIn => {
+                self.cancel_sign_in.store(true, Relaxed);
+                self.sign_in_generation += 1;
                 self.sign_in = None;
             }
-            Action::BrowserSignIn => {
-                self.ctx.open_url(egui::OpenUrl::new_tab(auth::ORIGIN));
-                if let Some(sign_in) = &mut self.sign_in {
-                    sign_in.status =
-                        "Sign in to YouTube Music in your browser, then paste the cookie below to connect your account.".to_owned();
-                }
-            }
-            Action::CookieSignIn => {
-                let pasted = self.sign_in.as_ref().map(|sign_in| sign_in.cookie.clone()).unwrap_or_default();
-                self.start_sign_in("Checking with YouTube.", move || auth::clean_cookie(&pasted));
-            }
+            Action::BrowserSignIn => self.start_sign_in(),
             Action::SignOut => self.sign_out(),
             Action::Undo => {
                 if let Some((queue, current, position)) = self.replaced.take() {
@@ -991,6 +1010,10 @@ impl eframe::App for App {
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.cancel_sign_in.store(true, Relaxed);
+        for worker in self.sign_in_workers.drain(..) {
+            let _ = worker.join();
+        }
         if let Some(program) = &self.restart {
             update::restart(program, &crate::profile_arguments());
         }

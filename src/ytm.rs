@@ -146,13 +146,13 @@ pub struct Account {
     pub photo: String,
 }
 
-#[derive(Deserialize, PartialEq)]
+#[derive(Clone, Deserialize, PartialEq)]
 struct Clients {
     remix_version: String,
     player: PlayerClient,
 }
 
-#[derive(Deserialize, PartialEq)]
+#[derive(Clone, Deserialize, PartialEq)]
 struct PlayerClient {
     id: String,
     user_agent: String,
@@ -259,6 +259,17 @@ impl Client {
             name: text(&header["accountName"]),
             photo: thumb(&header["accountPhoto"]),
         })
+    }
+
+    pub fn verify_session(&self, cookie: &str) -> Result<Account, String> {
+        let mut probe = Self::new(self.visitor());
+        probe.agent = ureq::AgentBuilder::new()
+            .timeout_connect(Duration::from_secs(5))
+            .timeout_read(Duration::from_secs(8))
+            .user_agent(WEB_UA)
+            .build();
+        *probe.clients.lock().unwrap() = self.clients.lock().unwrap().clone();
+        probe.sign_in(cookie.to_owned())
     }
 
     fn end_session(&self, rejected: &str) {

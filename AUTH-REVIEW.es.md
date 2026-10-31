@@ -1,49 +1,57 @@
-# Autenticación de Tubefast Stats — versión 3
+# Autenticación de Tubefast Stats — versión 4
 
-Fecha: 30 de octubre de 2026. Esta actualización reemplaza la descripción del inicio de sesión del fork anterior. La revisión original tomó como base `c6c55dd6b1ef60f0339737e7279cda2ff3b433e2`.
+Fecha: 30 de octubre de 2026. Esta versión reemplaza el acceso manual de la versión 3 por conexión automática, usando una ventana normal de Edge o Chrome. No se inició sesión con cuentas reales del usuario durante el desarrollo.
 
-## Qué fallaba
+## Experiencia de acceso
 
-El original abría Edge/Chrome con un perfil especial y vigilaba el proceso que lo lanzaba. En esta máquina, ese proceso termina aunque el navegador real siga funcionando. La prueba original de integración con Edge, usando exclusivamente cookies ficticias, reprodujo el mismo error: “The browser window was closed before you signed in.”
+1. Pulsa **Conectar con Google** en Tubefast.
+2. Se abre una ventana normal, con barra de direcciones y pestañas. En Windows se prefiere el navegador predeterminado cuando es Edge o Chrome; en caso contrario se busca uno compatible instalado.
+3. Inicia sesión en la página oficial de Google. Si Google ofrece una clave de acceso desde otro dispositivo, se puede usar el QR con el iPhone y Face ID.
+4. Tubefast detecta la sesión de YouTube, la valida contra YouTube y conecta la cuenta automáticamente. Después cierra su ventana temporal. No hay que copiar cookies, pegar datos ni usar herramientas de desarrollo.
 
-La captura también muestra UrbanVPN y un aviso de iCloud. No encontré URLs de UrbanVPN ni código que instale esas extensiones en el cliente. La captura por sí sola no permite determinar qué componente del navegador abrió esa página.
+El acceso requiere Edge o Chrome instalado. No se implementó OAuth ni un QR propio: Google gestiona la autenticación y Tubefast recibe la sesión resultante de su propio perfil temporal.
 
-## Cambio en esta versión
+## Fallo corregido
 
-A petición del usuario, **Open my browser** ahora solicita al sistema abrir `https://music.youtube.com` en el navegador predeterminado. Usa la integración nativa de egui/eframe, que delega en `webbrowser::open`. No fija Edge ni Chrome, no crea perfiles temporales, no lanza ventanas de aplicación especiales y no abre puertos de depuración.
+El código original vigilaba el proceso que arrancaba Edge/Chrome. En esta máquina ese proceso puede terminar mientras el navegador real sigue abierto. La prueba original, con cookies ficticias, reprodujo el falso aviso de cierre.
 
-El usuario inicia sesión en su navegador y pega explícitamente la cookie de YouTube Music en Tubefast. **Abrir la página no conecta la cuenta automáticamente.** La app comprueba la cookie con YouTube antes de guardar la sesión.
+El nuevo flujo vigila respuestas de la conexión local del navegador y sus páginas, no la vida del lanzador. Tolera el arranque y desconexiones breves. Cada intento usa un perfil nuevo y un puerto elegido por el navegador, descubierto en el archivo de ese perfil, lo que evita reutilizar un intento anterior o competir por un puerto preseleccionado.
 
-La versión nueva no cierra ventanas de navegador ni elimina perfiles anteriores. Las ventanas antiguas del flujo original deben cerrarse manualmente; esta actualización no accede a ellas.
+La sesión se comprueba antes de cerrar la ventana. Una cookie todavía incompleta no se guarda como conexión exitosa. La validación usa un cliente separado y los resultados llevan un identificador de intento: cancelar y volver a probar no permite que un resultado anterior conecte otra cuenta.
 
-## QR, iPhone y Face ID
+## Qué datos maneja la app
 
-Google puede ofrecer una clave de acceso de otro dispositivo: el ordenador muestra un QR y el iPhone permite confirmar con Face ID. Depende de tener una clave de acceso configurada y dispositivos/navegador compatibles. Google y el sistema gestionan esa autenticación; Tubefast no recibe información biométrica.
+- La contraseña y la verificación biométrica se introducen en Google y el sistema; Tubefast no solicita contraseñas ni recibe datos de Face ID.
+- El navegador usa un perfil separado de las sesiones habituales, con extensiones y sincronización desactivadas para ese arranque.
+- Un canal de depuración local, conectado a `127.0.0.1`, recupera las cookies del perfil temporal. El código filtra dominios `youtube.com` y subdominios reales; excluye Google y dominios parecidos de terceros.
+- La app valida la cookie mediante las solicitudes HTTPS de `src/ytm.rs` a `music.youtube.com`. No encontré que se adjunte a GitHub, Discord, lrclib o un servidor del autor.
+- En Windows la cookie aceptada se guarda cifrada con DPAPI en `session.bin`. En macOS/Linux el código sigue usando un archivo sin cifrado creado con modo `0600`.
+- La limpieza normal intenta cerrar el navegador temporal y eliminar únicamente el perfil creado para ese intento. Comprueba que la ruta resuelta permanezca bajo su directorio antes de eliminarla.
 
-Ese mecanismo autentica el navegador. No entrega por sí solo la sesión a Tubefast. Una conexión automática mediante OAuth requiere registrar un cliente de Google y adaptar el cliente para usar las APIs y permisos admitidos; este fork todavía usa cookies y la API interna de YouTube Music. No se añadió un QR propio ni se presentó OAuth como implementado.
+## Límites
 
-## Almacenamiento y destinos
+DPAPI no aísla el archivo frente a todo programa ejecutado con el mismo usuario. Las cookies son credenciales reutilizables y el puerto local es sensible mientras el acceso está abierto. Un bloqueo del sistema, cierre forzado o restricción empresarial puede impedir el acceso o la limpieza; no se garantiza el borrado de respaldos ni de todos los residuos de un cierre abrupto.
 
-- En Windows, `src/auth.rs::store` cifra la cookie mediante DPAPI y la guarda en `session.bin` bajo el directorio de datos del fork. La cookie descifrada se conserva en memoria para autenticar solicitudes.
-- En macOS/Linux este código no cifra el archivo: lo crea con modo `0600`. Ese modo no corrige los permisos de un archivo que ya existiera con permisos más amplios.
-- `src/ytm.rs::music` adjunta Cookie y Authorization a solicitudes HTTPS al dominio fijo `music.youtube.com`. No encontré envío de estas credenciales al autor, a GitHub, Discord o lrclib en el recorrido revisado.
-- La dependencia fijada `ureq 2.12.1` elimina Cookie al redirigir y limita la propagación de Authorization.
-- Cerrar sesión borra la cookie en memoria y pide eliminar el archivo local. No revoca la sesión en Google ni invalida una copia robada.
+Cerrar sesión en Tubefast elimina la sesión local, pero no revoca una copia robada en Google. En macOS/Linux el modo de creación tampoco corrige permisos más amplios de un archivo que ya existiera.
 
-## Límites de seguridad
+El endpoint de audio sigue consultando sin cookies. El indicador compara AAC anunciados en esa respuesta; no certifica la máxima calidad Premium de la cuenta.
 
-El almacenamiento local cifrado en Windows es real, pero DPAPI no aísla las credenciales frente a todo proceso ejecutado con tu mismo usuario. La cookie sigue siendo una credencial reutilizable. El método manual también implica portapapeles y un campo visible: no se debe compartir la cookie por chat, publicarla ni incluirla en capturas o registros.
+Esta revisión acotada no certifica todas las dependencias ni los binarios de terceros. Preferiría usar una cuenta secundaria antes que mi cuenta principal.
 
-Yo usaría la app sin cuenta o con una secundaria antes que con mi cuenta principal. Esta revisión no certifica binarios ajenos, dependencias completas ni versiones futuras. No se inició sesión con ninguna cuenta real ni se leyeron cookies del usuario.
+## Verificación
 
-El endpoint de reproducción sigue consultando sin cookies: el indicador de calidad solo puede comparar AAC anunciados en esa respuesta, no certificar una máxima calidad Premium.
+Pasaron **39 pruebas**, incluyendo tres con Edge real en modo sin interfaz, perfiles nuevos, `about:blank` y cookies exclusivamente ficticias:
 
-## Verificación y fuentes
+- La sesión validada se recupera aunque el proceso lanzador haya terminado.
+- La cancelación cierra el navegador de prueba y elimina su perfil.
+- El navegador permanece disponible después de rechazar una sesión incompleta y conecta cuando la nueva sesión pasa la validación.
 
-La versión final conserva las pruebas de firmas de solicitud, limpieza de cookies ficticias y cifrado de Windows. La prueba del antiguo lector de navegador se retiró junto con ese lector. Pasaron 33 pruebas y la comprobación de Clippy; se verificó en el código de la integración nativa que la apertura utiliza el navegador predeterminado. No se completó un inicio de sesión real.
+También se comprobaron el filtrado de dominios, los tiempos de arranque/desconexión, la separación y eliminación de perfiles y la protección DPAPI de Windows. Clippy pasó sin advertencias. No se completó un acceso real a Google con ninguna cuenta.
 
-- [Base original revisada](https://github.com/yigitbozyaka/tubefast/tree/c6c55dd6b1ef60f0339737e7279cda2ff3b433e2).
+## Referencias
+
+- [Código del fork](https://github.com/xXROCHETXx/tubefast).
 - [Microsoft: alcance y límites de CryptProtectData](https://learn.microsoft.com/en-us/windows/win32/SecCrypto/example-c-program-using-cryptprotectdata).
-- [Google: acceso con claves de acceso](https://support.google.com/accounts/answer/13548313?hl=es).
-- [Apple: claves de acceso desde el iPhone](https://support.apple.com/en-euro/guide/iphone/iphf538ea8d0/ios).
-- [Google: OAuth para dispositivos y sus requisitos](https://developers.google.com/identity/protocols/oauth2/limited-input-device).
+- [Chrome: uso de perfiles separados para depuración](https://developer.chrome.com/blog/remote-debugging-port).
+- [Chrome DevTools Protocol y descubrimiento del puerto](https://chromedevtools.github.io/devtools-protocol/).
+- [Google: claves de acceso y acceso desde otro dispositivo](https://support.google.com/accounts/answer/13548313?hl=es).

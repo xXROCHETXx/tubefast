@@ -26,7 +26,7 @@ cargo clippy --all-targets -- -D warnings
 cargo test
 ```
 
-Account connection opens the system's default browser and accepts an explicitly pasted YouTube Music cookie. Tests use synthetic cookies; never capture or publish real session headers in test fixtures or logs.
+Account connection uses a normal, isolated Edge/Chrome window and verifies the session automatically. `cargo test -- --include-ignored` also runs browser lifecycle tests with synthetic cookies in fresh profiles on `about:blank`. Never use real accounts or publish real session headers in test fixtures or logs.
 
 ## Branches and pull requests
 
@@ -46,7 +46,8 @@ Account connection opens the system's default browser and accepts an explicitly 
 | `src/media.rs` | Media keys, the Windows media overlay, macOS Now Playing and Linux MPRIS. |
 | `src/discord.rs` | Discord Rich Presence: the playing song, sent to the local Discord app over its IPC socket. |
 | `src/update.rs` | The in-app updater: download, checksum, replacing the running program, restart. |
-| `src/auth.rs` | Sign-in: cookie handling, request signing, encrypted storage, the browser flow. |
+| `src/auth.rs` | Request signing and encrypted session storage. |
+| `src/browser_login.rs` | Isolated normal browser window, automatic session detection, validation, cancellation and cleanup. |
 | `src/art.rs` | Artwork download, decode and texture cache with a memory budget. |
 | `src/app.rs` | Application state. Applies the actions the interface emits. |
 | `src/ui.rs` | Everything drawn on screen. Emits actions, never changes state itself. |

@@ -8,7 +8,7 @@ Fork de [yigitbozyaka/tubefast](https://github.com/yigitbozyaka/tubefast) con un
 - La información acompaña al stream en caché y se reinicia al cambiar de pista; una precarga no sustituye las estadísticas del audio actual.
 - El formato reproducido sigue siendo el AAC itag 140 del original. Este fork no agrega selección ni desbloqueo de calidad. El indicador compara bitrate entre AAC de la respuesta recibida, no entre códecs distintos ni contra todo el catálogo de YouTube. El endpoint de reproducción del original consulta sin cookies incluso con una cuenta conectada: no puede certificar la máxima calidad Premium.
 - Usa el nombre **Tubefast Stats** y datos separados (`tubefast-stats`) para convivir con el original. El actualizador apunta a este fork.
-- **Inicio de sesión actualizado:** abre YouTube Music en el navegador predeterminado del sistema. Para conectar la cuenta a Tubefast, inicia sesión allí y pega la cookie en el diálogo de la app. No abre perfiles especiales ni puertos de depuración; abrir la página por sí solo no conecta la cuenta automáticamente.
+- **Inicio de sesión automático:** pulsa **Conectar con Google**, inicia sesión en una ventana normal de Edge o Chrome y vuelve a Tubefast. La app valida y guarda la sesión automáticamente. No hay campos de cookies ni herramientas de desarrollo. En Windows usa el navegador predeterminado si es Edge/Chrome; si no, busca uno compatible instalado. Cada intento usa un perfil temporal separado y sin extensiones.
 
 Revisión de autenticación y límites: [AUTH-REVIEW.es.md](AUTH-REVIEW.es.md).
 
@@ -121,14 +121,15 @@ Windows and macOS are the platforms it is used on most. On macOS and Linux the s
 
 Everything except your personal feed and your playlists works without an account. To connect your account, click **Sign in** at the bottom of the sidebar:
 
-- **Open my browser** opens YouTube Music through the system's default browser, using your normal browser window and session.
-- Sign in there, then **paste your cookie** into Tubefast and choose **Use this cookie**. The dialog explains how to copy the request header from your browser's developer tools. You can paste an existing YouTube Music cookie directly if you are already signed in.
+- Choose **Conectar con Google**. Tubefast opens a normal Edge or Chrome window with its address bar and tabs.
+- Sign in on Google's page. Tubefast verifies the session with YouTube, connects your library automatically and closes the temporary browser window.
+- Closing the Tubefast dialog cancels that attempt. Retry starts with a new isolated profile; a result from an old attempt cannot connect a different account.
 
-Opening the page does not transfer your session automatically. This fork no longer launches a dedicated browser profile or reads browser cookies through a debugging port. The browser stays under your control, including when you close the Tubefast dialog.
+No cookie copying or developer tools are needed. Edge or Chrome must be installed. On Windows, the default browser is preferred when it is compatible; otherwise an installed compatible browser is selected. The sign-in uses a temporary profile with extensions and sync disabled, separate from your everyday browser. A local debugging connection reads only YouTube-domain cookies from that temporary profile. Password entry stays on Google's page. See the [authentication review](AUTH-REVIEW.es.md) for the security limits.
 
-If Google offers a passkey from another device, you can scan its QR with an iPhone and confirm with Face ID. Google manages that browser sign-in; connecting Tubefast still requires the cookie step above. See [Google's passkey guide](https://support.google.com/accounts/answer/13548313).
+If Google offers a passkey from another device, you can scan its QR with an iPhone and confirm with Face ID. Google manages that browser sign-in; Tubefast picks up the resulting YouTube session automatically. See [Google's passkey guide](https://support.google.com/accounts/answer/13548313).
 
-Your session never leaves your computer. It is stored in your user profile, encrypted with your Windows account (DPAPI) or, on macOS and Linux, in a file only your user can read, and is sent only to YouTube. Sign out removes it.
+Your session is stored in your user profile, encrypted with your Windows account (DPAPI) or, on macOS and Linux, in a file created with user-only permissions. It is sent to YouTube to authenticate requests. Sign out removes the local copy.
 
 ## Shortcuts
 

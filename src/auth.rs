@@ -4,9 +4,9 @@ use std::path::{Path, PathBuf};
 
 pub const ORIGIN: &str = "https://music.youtube.com";
 pub const SESSION_KEPT: &str = if cfg!(windows) {
-    "The session stays on this computer, encrypted with your Windows account."
+    "La sesión se guarda en este equipo, cifrada con tu cuenta de Windows."
 } else {
-    "The session stays on this computer, in a file only your user account can read."
+    "La sesión se guarda en este equipo, en un archivo privado de tu usuario."
 };
 
 fn sapisid(cookie: &str) -> Option<&str> {
@@ -19,25 +19,6 @@ pub fn authorization(cookie: &str, unix_seconds: u64) -> Option<String> {
     let digest = ring::digest::digest(&ring::digest::SHA1_FOR_LEGACY_USE_ONLY, input.as_bytes());
     let hex: String = digest.as_ref().iter().map(|byte| format!("{byte:02x}")).collect();
     Some(format!("SAPISIDHASH {unix_seconds}_{hex}"))
-}
-
-pub fn clean_cookie(pasted: &str) -> Result<String, String> {
-    let header = pasted
-        .to_ascii_lowercase()
-        .find("cookie:")
-        .map(|at| pasted[at + 7..].lines().next().unwrap_or_default());
-    let raw = header.map_or_else(|| pasted.replace(['\r', '\n'], ""), str::to_owned);
-    let raw = raw.trim().trim_end_matches('\\').trim().trim_matches(['\'', '"']);
-    let cookie = raw
-        .split(';')
-        .map(str::trim)
-        .filter(|pair| pair.contains('='))
-        .collect::<Vec<_>>()
-        .join("; ");
-    match sapisid(&cookie) {
-        Some(_) => Ok(cookie),
-        None => Err("That text has no YouTube session in it. Copy the whole cookie value while signed in.".to_owned()),
-    }
 }
 
 fn session_file() -> Option<PathBuf> {
@@ -111,21 +92,6 @@ mod tests {
         let expected = "SAPISIDHASH 1700000000_149e3c5c81746e107a88a2e0103de8a4b63040a3";
         assert_eq!(authorization(cookie, 1_700_000_000).as_deref(), Some(expected));
         assert_eq!(authorization("SID=a", 1_700_000_000), None);
-    }
-
-    #[test]
-    fn accepts_a_raw_cookie_a_header_line_or_a_curl_command() {
-        let raw = "SID=a;  SAPISID=k ; junk; LOGIN_INFO=x";
-        assert_eq!(clean_cookie(raw).unwrap(), "SID=a; SAPISID=k; LOGIN_INFO=x");
-        assert_eq!(
-            clean_cookie("accept: */*\r\nCookie: SID=a; SAPISID=k\r\nuser-agent: x").unwrap(),
-            "SID=a; SAPISID=k"
-        );
-        assert_eq!(
-            clean_cookie("curl 'https://x' \\\n  -H 'cookie: SID=a; SAPISID=k' \\\n  -H 'x: y'").unwrap(),
-            "SID=a; SAPISID=k"
-        );
-        assert!(clean_cookie("SID=a; HSID=b").is_err());
     }
 
     #[cfg(windows)]
