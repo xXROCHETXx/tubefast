@@ -29,7 +29,7 @@ const FLOATING: Color32 = rgb(0x1B1C21);
 const SIDEBAR_WIDTH: f32 = 244.0;
 const QUEUE_WIDTH: f32 = 336.0;
 const QUEUE_MIN_WINDOW: f32 = 1140.0;
-const BAR_HEIGHT: f32 = 116.0;
+const BAR_HEIGHT: f32 = 84.0;
 const ACCOUNT_HEIGHT: f32 = 68.0;
 const UPDATE_HEIGHT: f32 = 50.0;
 const TOPBAR_HEIGHT: f32 = 68.0;
@@ -476,7 +476,7 @@ pub fn draw(app: &mut App, ctx: &egui::Context) -> Vec<Action> {
     let mut out = Vec::new();
     let plain = |fill: Color32| Frame::new().fill(fill);
     let scrub = egui::TopBottomPanel::bottom("player")
-        .exact_height(if app.saved.stats.enabled { BAR_HEIGHT } else { 84.0 })
+        .exact_height(BAR_HEIGHT)
         .show_separator_line(false)
         .frame(plain(PANEL))
         .show(ctx, |ui| player_bar(app, ui, &mut out))
@@ -2305,6 +2305,8 @@ fn player_bar(app: &App, ui: &mut Ui, out: &mut Vec<Action>) -> Scrub {
     if backdrop.clicked() && item.is_some() {
         out.push(Action::Expand(!app.expanded));
     }
+    let stats_rect = audio_stats(app, ui, out, bar);
+    let track_right = stats_rect.map_or(bar.center().x - 170.0, |rect| rect.left() - 16.0);
 
     let zone = Rect::from_min_size(bar.min, vec2(bar.width(), 12.0));
     let sense = if duration > 0 { Sense::click_and_drag() } else { Sense::hover() };
@@ -2337,7 +2339,7 @@ fn player_bar(app: &App, ui: &mut Ui, out: &mut Vec<Action>) -> Scrub {
             let art = Rect::from_min_size(pos2(bar.left() + 18.0, mid - BAR_ART / 2.0), Vec2::splat(BAR_ART));
             artwork(ui, &app.art, app.saved.covers.of(item), art, 6.0);
             let left = art.right() + 14.0;
-            let width = (bar.center().x - 170.0 - left - 44.0).max(60.0);
+            let width = (track_right - left - 44.0).max(40.0);
             let title = label(
                 ui,
                 pos2(left, mid - 10.0),
@@ -2384,7 +2386,7 @@ fn player_bar(app: &App, ui: &mut Ui, out: &mut Vec<Action>) -> Scrub {
                 "Nothing playing",
                 sans(13.5),
                 FAINT,
-                200.0,
+                (track_right - art.right() - 14.0).clamp(40.0, 200.0),
             );
         }
     }
@@ -2552,24 +2554,51 @@ fn player_bar(app: &App, ui: &mut Ui, out: &mut Vec<Action>) -> Scrub {
         let time = format!("{}  /  {}", clock(position), clock(duration));
         label(ui, pos2(right, mid), Align2::RIGHT_CENTER, &time, sans(12.5), MUTED, 140.0);
     }
-    audio_stats(app, ui, out, bar);
     scrub
+}
+
+fn stats_switch(ui: &mut Ui, text: &str, on: bool) -> bool {
+    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 40.0), Sense::click());
+    let hover = hover_of(ui, &response);
+    ui.painter().rect_filled(rect, 8.0, veil(0.06 * hover));
+    let track = Rect::from_center_size(pos2(rect.right() - 27.0, rect.center().y), vec2(30.0, 18.0));
+    label(
+        ui,
+        pos2(rect.left() + 12.0, rect.center().y),
+        Align2::LEFT_CENTER,
+        text,
+        medium(13.0),
+        TEXT,
+        track.left() - rect.left() - 24.0,
+    );
+    let lit = ui.ctx().animate_bool_with_time(response.id.with("switch"), on, HOVER_TIME);
+    ui.painter().rect_filled(track, 9.0, veil(0.16).lerp_to_gamma(ACCENT, lit));
+    let knob = pos2(egui::lerp(track.left() + 9.0..=track.right() - 9.0, lit), track.center().y);
+    ui.painter().circle_filled(knob, 6.0, TEXT.lerp_to_gamma(ON_ACCENT, lit));
+    response.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, true, on, text));
+    point_at(&response);
+    response.clicked()
+}
+
+fn stats_divider(ui: &mut Ui) {
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 17.0), Sense::hover());
+    ui.painter().hline(rect.x_range(), rect.center().y, Stroke::new(1.0, veil(0.08)));
 }
 
 fn stats_options(app: &App, ui: &mut Ui, out: &mut Vec<Action>) {
     let mut options = app.saved.stats.clone();
-    if switch_row(ui, icon::WAVEFORM, "Estadísticas de audio", options.enabled) {
+    if stats_switch(ui, "Mostrar estadísticas", options.enabled) {
         options.enabled = !options.enabled;
     }
     if options.enabled {
         for (name, selected) in [
             ("Bitrate", &mut options.bitrate),
-            ("Muestreo (kHz)", &mut options.sample_rate),
+            ("Frecuencia de muestreo", &mut options.sample_rate),
             ("Canales", &mut options.channels),
             ("Máxima AAC", &mut options.maximum),
             ("Buffer descargado", &mut options.buffer),
         ] {
-            if switch_row(ui, icon::CHECK, name, *selected) {
+            if stats_switch(ui, name, *selected) {
                 *selected = !*selected;
             }
         }
@@ -2579,9 +2608,9 @@ fn stats_options(app: &App, ui: &mut Ui, out: &mut Vec<Action>) {
     }
 }
 
-fn audio_stats(app: &App, ui: &mut Ui, out: &mut Vec<Action>, bar: Rect) {
+fn audio_stats(app: &App, ui: &mut Ui, out: &mut Vec<Action>, bar: Rect) -> Option<Rect> {
     if !app.saved.stats.enabled {
-        return;
+        return None;
     }
     let stats = app.player.stats();
     let options = &app.saved.stats;
@@ -2631,9 +2660,13 @@ fn audio_stats(app: &App, ui: &mut Ui, out: &mut Vec<Action>, bar: Rect) {
             (icon::WAVEFORM, FAINT)
         }
     };
-    let text = fields.join("  ·  ");
-    let galley = fit(ui, &text, medium(11.5), color, bar.width() - 100.0, 1);
-    let rect = Rect::from_center_size(pos2(bar.center().x, bar.bottom() - 18.0), vec2(galley.size().x + 46.0, 27.0));
+    let text = fields.join(" · ");
+    let limit = (bar.width() * 0.22).clamp(120.0, 250.0);
+    let galley = fit(ui, &text, medium(11.5), color, limit - 46.0, 1);
+    let rect = Rect::from_min_size(
+        pos2(bar.center().x - 138.0 - galley.size().x - 46.0, bar.top() + 31.0),
+        vec2(galley.size().x + 46.0, 28.0),
+    );
     let response = ui.interact(rect, Id::new("audio-stats"), Sense::click());
     let hover = hover_of(ui, &response);
     ui.painter().rect(
@@ -2655,23 +2688,89 @@ fn audio_stats(app: &App, ui: &mut Ui, out: &mut Vec<Action>, bar: Rect) {
     describe(&response, &format!("Estadísticas de audio: {text}. Configurar y copiar"));
     egui::Popup::menu(&response)
         .align(egui::RectAlign::TOP_START)
+        .gap(12.0)
+        .frame(
+            Frame::new()
+                .fill(FLOATING)
+                .stroke(Stroke::new(1.0, veil(0.10)))
+                .corner_radius(16)
+                .inner_margin(Margin::same(16))
+                .shadow(Shadow {
+                    offset: [0, 8],
+                    blur: 24,
+                    spread: 0,
+                    color: shade(0.4),
+                }),
+        )
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
         .show(|ui| {
-            ui.set_width(MENU_WIDTH);
-            ui.add(egui::Label::new(RichText::new("Audio en reproducción").font(bold(15.0)).color(TEXT)).selectable(true));
-            ui.add_space(8.0);
-            ui.add(egui::Label::new(RichText::new(&text).color(color)).selectable(true));
-            if let Some(stats) = &stats {
-                let highest = stats.max_bitrate.map_or("sin verificar".into(), |n| format!("{} kbps", (n + 500) / 1000));
-                ui.add(egui::Label::new(RichText::new(format!("Máxima AAC anunciada: {highest}")).color(MUTED)).selectable(true));
-            }
-            ui.add(egui::Label::new(RichText::new("Compara bitrate entre los formatos AAC anunciados en la respuesta del reproductor, que consulta sin cookies. No verifica otros códecs ni calidades Premium.").size(11.5).color(MUTED)).wrap());
-            if menu_row(ui, icon::COPY, glyph(16.0), MUTED, "Copiar estadísticas").clicked() {
-                ui.ctx().copy_text(text.clone());
-            }
-            menu_divider(ui);
-            stats_options(app, ui, out);
+            ui.set_width(288.0);
+            ui.with_layout(egui::Layout::top_down(Align::Min), |ui| {
+                ui.add(egui::Label::new(RichText::new("Audio en reproducción").font(bold(15.0)).color(TEXT)).selectable(true));
+                ui.add_space(14.0);
+                Frame::new()
+                    .fill(color.gamma_multiply(0.06))
+                    .corner_radius(10)
+                    .inner_margin(Margin::same(12))
+                    .show(ui, |ui| {
+                        ui.set_width(264.0);
+                        ui.add(
+                            egui::Label::new(RichText::new(&text).font(medium(13.0)).color(color))
+                                .wrap()
+                                .selectable(true),
+                        );
+                        ui.add_space(6.0);
+                        let highest = stats
+                            .as_ref()
+                            .and_then(|stats| stats.max_bitrate)
+                            .map_or("sin verificar".into(), |n| format!("{} kbps", (n + 500) / 1000));
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(format!("Máxima AAC anunciada: {highest}"))
+                                    .font(sans(12.0))
+                                    .color(MUTED),
+                            )
+                            .wrap()
+                            .selectable(true),
+                        );
+                    });
+                ui.add_space(12.0);
+                ui.add(
+                    egui::Label::new(
+                        RichText::new("Según la respuesta de YouTube. No compara otros códecs ni calidad Premium.")
+                            .font(sans(12.0))
+                            .color(MUTED),
+                    )
+                    .wrap(),
+                );
+                ui.add_space(8.0);
+                let (row, copy) = ui.allocate_exact_size(vec2(ui.available_width(), 36.0), Sense::click());
+                ui.painter().rect_filled(row, 8.0, veil(0.04 + 0.04 * hover_of(ui, &copy)));
+                ui.painter().text(
+                    pos2(row.left() + 20.0, row.center().y),
+                    Align2::CENTER_CENTER,
+                    icon::COPY,
+                    glyph(16.0),
+                    MUTED,
+                );
+                label(
+                    ui,
+                    pos2(row.left() + 40.0, row.center().y),
+                    Align2::LEFT_CENTER,
+                    "Copiar estadísticas",
+                    medium(13.0),
+                    TEXT,
+                    row.width() - 52.0,
+                );
+                describe(&copy, "Copiar estadísticas");
+                if copy.clicked() {
+                    ui.ctx().copy_text(text.clone());
+                }
+                stats_divider(ui);
+                stats_options(app, ui, out);
+            });
         });
+    Some(rect)
 }
 
 fn paint_scrubber(ctx: &egui::Context, scrub: &Scrub) {
@@ -2699,10 +2798,7 @@ fn notice(app: &App, ctx: &egui::Context, out: &mut Vec<Action>) {
     let Some(notice) = &app.notice else { return };
     egui::Area::new(Id::new("notice"))
         .order(egui::Order::Foreground)
-        .anchor(
-            Align2::CENTER_BOTTOM,
-            vec2(0.0, -(if app.saved.stats.enabled { BAR_HEIGHT } else { 84.0 } + 22.0)),
-        )
+        .anchor(Align2::CENTER_BOTTOM, vec2(0.0, -(BAR_HEIGHT + 22.0)))
         .interactable(notice.action.is_some())
         .show(ctx, |ui| {
             let text = fit(ui, &notice.text, medium(13.5), PANEL, 420.0, 2);

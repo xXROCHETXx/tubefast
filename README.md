@@ -2,7 +2,7 @@
 
 Fork de [yigitbozyaka/tubefast](https://github.com/yigitbozyaka/tubefast) con una franja compacta de estadísticas reales del audio. Conserva el reproductor y su interfaz.
 
-- Pulsa la pastilla debajo de los controles para elegir bitrate, frecuencia, canales, indicador de máxima AAC y buffer. También puedes configurarlos desde el engranaje.
+- Pulsa la pastilla a la izquierda de los controles para elegir bitrate, frecuencia, canales, indicador de máxima AAC y buffer. También puedes configurarlos desde el engranaje. El panel usa márgenes uniformes, filas alineadas y valores seleccionables; la pastilla se ajusta al ancho de la ventana y el panel muestra el detalle completo.
 - Verde con check: el bitrate actual es el máximo AAC anunciado. Ámbar con flecha: se anuncia un AAC superior. Gris: faltan datos para verificarlo. El texto explica el estado sin depender del color.
 - El panel permite seleccionar y copiar el texto. Las preferencias se guardan entre ejecuciones.
 - La información acompaña al stream en caché y se reinicia al cambiar de pista; una precarga no sustituye las estadísticas del audio actual.
