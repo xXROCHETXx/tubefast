@@ -3,8 +3,8 @@
 mod app;
 mod art;
 mod auth;
-mod browser_login;
 mod discord;
+mod extension_login;
 mod media;
 mod player;
 mod stats;

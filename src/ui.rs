@@ -1882,43 +1882,25 @@ fn sign_in_dialog(app: &mut App, ctx: &egui::Context, out: &mut Vec<Action>) {
             let width = ui.available_width();
             let (head, _) = ui.allocate_exact_size(vec2(width, 44.0), Sense::hover());
             ui.painter()
-                .text(head.left_center(), Align2::LEFT_CENTER, "Tu cuenta", display(38.0), TEXT);
+                .text(head.left_center(), Align2::LEFT_CENTER, "Sign in", display(38.0), TEXT);
             let slot = Rect::from_center_size(pos2(head.right() - 16.0, head.center().y), Vec2::splat(34.0));
             let closed = icon_button(ui, slot, Id::new("sign-in-close"), icon::X, glyph(16.0), MUTED, "Close").clicked();
             ui.add_space(8.0);
-            paragraph(ui, "Conecta tu biblioteca y tus playlists de YouTube Music.", sans(14.0), MUTED, 2);
+            paragraph(ui, "Your library and playlists from YouTube Music.", sans(14.0), MUTED, 2);
             ui.add_space(24.0);
 
             let (row, _) = ui.allocate_exact_size(vec2(width, 42.0), Sense::hover());
-            let caption = if sign_in.busy {
-                "Esperando a Google…"
-            } else {
-                "Conectar con Google"
-            };
-            if pill(ui, row.min, Id::new("sign-in-browser"), icon::GLOBE, caption, true).clicked() && !sign_in.busy {
+            if pill(ui, row.min, Id::new("sign-in-browser"), icon::GLOBE, "Continue in browser", true).clicked() && !sign_in.busy {
                 out.push(Action::BrowserSignIn);
             }
-            ui.add_space(20.0);
-            for (number, instruction) in [
-                ("1", "Se abre una ventana normal de Edge o Chrome."),
-                (
-                    "2",
-                    "Inicia sesión en Google. Puedes usar una clave de acceso con tu iPhone si Google te ofrece esa opción.",
-                ),
-                ("3", "Vuelve a Tubefast: tu cuenta se conecta automáticamente."),
-            ] {
-                ui.horizontal(|ui| {
-                    let (circle, _) = ui.allocate_exact_size(vec2(24.0, 24.0), Sense::hover());
-                    ui.painter().circle_filled(circle.center(), 12.0, veil(0.06));
-                    ui.painter()
-                        .text(circle.center(), Align2::CENTER_CENTER, number, medium(12.0), MUTED);
-                    ui.add_space(10.0);
-                    ui.allocate_ui_with_layout(vec2(width - 34.0, 0.0), egui::Layout::top_down(Align::Min), |ui| {
-                        ui.add(egui::Label::new(RichText::new(instruction).font(sans(13.0)).color(MUTED)).wrap());
-                    });
-                });
-                ui.add_space(12.0);
-            }
+            ui.add_space(12.0);
+            paragraph(
+                ui,
+                "Use your current YouTube session with the Tubefast Connect browser extension.",
+                sans(13.0),
+                MUTED,
+                3,
+            );
             ui.add_space(4.0);
 
             if !sign_in.status.is_empty() {

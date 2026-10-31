@@ -210,6 +210,7 @@ enum Event {
         generation: u64,
         result: Result<(Account, String), String>,
     },
+    SignInBrowser(u64),
     Library(Vec<Item>),
     Liked(Vec<Item>),
     LikeRejected(Item, String),
@@ -438,14 +439,19 @@ impl App {
         let cancel = self.cancel_sign_in.clone();
         if let Some(sign_in) = &mut self.sign_in {
             sign_in.busy = true;
-            sign_in.status = "Continúa en la ventana del navegador. Al terminar, tu cuenta se conectará automáticamente.".to_owned();
+            sign_in.status = "Open Tubefast Connect in your browser and click Connect to use your current YouTube session.".to_owned();
         }
         self.sign_in_workers.retain(|worker| !worker.is_finished());
         let (yt, sender, ctx) = (self.yt.clone(), self.sender.clone(), self.ctx.clone());
         self.sign_in_workers.push(std::thread::spawn(move || {
-            let signed = eframe::storage_dir(crate::app_id())
-                .ok_or("No se encontró una carpeta para el acceso.".to_owned())
-                .and_then(|root| crate::browser_login::sign_in(&root, &cancel, |cookie| yt.verify_session(cookie)));
+            let signed = crate::extension_login::sign_in(
+                &cancel,
+                || {
+                    let _ = sender.send(Event::SignInBrowser(generation));
+                    ctx.request_repaint();
+                },
+                |cookie| yt.verify_session(cookie),
+            );
             let _ = sender.send(Event::SignedIn {
                 generation,
                 result: signed,
@@ -703,6 +709,10 @@ impl App {
                     }
                 },
                 Event::SignedIn { .. } => {}
+                Event::SignInBrowser(generation) if generation == self.sign_in_generation && self.sign_in.is_some() => {
+                    ctx.open_url(egui::OpenUrl::new_tab(auth::ORIGIN));
+                }
+                Event::SignInBrowser(_) => {}
                 Event::Pressed(action) => self.apply(action),
                 Event::Discord(linked) => self.discord_linked = Some(linked),
                 Event::Lyrics(video_id, found) => {

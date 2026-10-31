@@ -8,7 +8,7 @@ Fork de [yigitbozyaka/tubefast](https://github.com/yigitbozyaka/tubefast) con un
 - La información acompaña al stream en caché y se reinicia al cambiar de pista; una precarga no sustituye las estadísticas del audio actual.
 - El formato reproducido sigue siendo el AAC itag 140 del original. Este fork no agrega selección ni desbloqueo de calidad. El indicador compara bitrate entre AAC de la respuesta recibida, no entre códecs distintos ni contra todo el catálogo de YouTube. El endpoint de reproducción del original consulta sin cookies incluso con una cuenta conectada: no puede certificar la máxima calidad Premium.
 - Usa el nombre **Tubefast Stats** y datos separados (`tubefast-stats`) para convivir con el original. El actualizador apunta a este fork.
-- **Inicio de sesión automático:** pulsa **Conectar con Google**, inicia sesión en una ventana normal de Edge o Chrome y vuelve a Tubefast. La app valida y guarda la sesión automáticamente. No hay campos de cookies ni herramientas de desarrollo. En Windows usa el navegador predeterminado si es Edge/Chrome; si no, busca uno compatible instalado. Cada intento usa un perfil temporal separado y sin extensiones.
+- **Conexión con tu sesión actual:** el panel vuelve a su presentación original. Pulsa **Continue in browser** y después **Conectar** en Tubefast Connect para usar la sesión de YouTube de tu Edge/Chrome habitual. Se requiere instalar la [extensión de desarrollo](browser-extension/README.md) una vez; todavía no está publicada en una tienda. La app valida y guarda la sesión sin copiar cookies ni abrir un navegador controlado.
 
 Revisión de autenticación y límites: [AUTH-REVIEW.es.md](AUTH-REVIEW.es.md).
 
@@ -121,13 +121,13 @@ Windows and macOS are the platforms it is used on most. On macOS and Linux the s
 
 Everything except your personal feed and your playlists works without an account. To connect your account, click **Sign in** at the bottom of the sidebar:
 
-- Choose **Conectar con Google**. Tubefast opens a normal Edge or Chrome window with its address bar and tabs.
-- Sign in on Google's page. Tubefast verifies the session with YouTube, connects your library automatically and closes the temporary browser window.
-- Closing the Tubefast dialog cancels that attempt. Retry starts with a new isolated profile; a result from an old attempt cannot connect a different account.
+- Install [Tubefast Connect](browser-extension/README.md) once in the Edge/Chrome profile where you already use YouTube Music.
+- Choose **Continue in browser**, then open **Tubefast Connect** from the browser toolbar and click **Conectar con Tubefast**.
+- Tubefast verifies the current YouTube session and connects your library. Closing the dialog cancels the pending connection; a result from an old attempt cannot connect another account.
 
-No cookie copying or developer tools are needed. Edge or Chrome must be installed. On Windows, the default browser is preferred when it is compatible; otherwise an installed compatible browser is selected. The sign-in uses a temporary profile with extensions and sync disabled, separate from your everyday browser. A local debugging connection reads only YouTube-domain cookies from that temporary profile. Password entry stays on Google's page. See the [authentication review](AUTH-REVIEW.es.md) for the security limits.
+No cookie copying is needed. The extension uses the browser's cookies API with explicit YouTube permission and sends the session only to the local app for the pending connection. There is no controlled sign-in browser or debugging port. This development extension is not yet available in a browser store; see its README for initial installation and distribution requirements. See the [authentication review](AUTH-REVIEW.es.md) for verification and security limits.
 
-If Google offers a passkey from another device, you can scan its QR with an iPhone and confirm with Face ID. Google manages that browser sign-in; Tubefast picks up the resulting YouTube session automatically. See [Google's passkey guide](https://support.google.com/accounts/answer/13548313).
+If you are not signed in, access YouTube Music normally in your browser first. Google may offer a passkey from your iPhone; Tubefast does not create its own Google QR code.
 
 Your session is stored in your user profile, encrypted with your Windows account (DPAPI) or, on macOS and Linux, in a file created with user-only permissions. It is sent to YouTube to authenticate requests. Sign out removes the local copy.
 

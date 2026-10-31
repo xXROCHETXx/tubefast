@@ -4,9 +4,9 @@ use std::path::{Path, PathBuf};
 
 pub const ORIGIN: &str = "https://music.youtube.com";
 pub const SESSION_KEPT: &str = if cfg!(windows) {
-    "La sesión se guarda en este equipo, cifrada con tu cuenta de Windows."
+    "The session stays on this computer, encrypted with your Windows account."
 } else {
-    "La sesión se guarda en este equipo, en un archivo privado de tu usuario."
+    "The session stays on this computer, in a file only your user account can read."
 };
 
 fn sapisid(cookie: &str) -> Option<&str> {
