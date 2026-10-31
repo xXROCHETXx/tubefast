@@ -29,7 +29,7 @@ const FLOATING: Color32 = rgb(0x1B1C21);
 const SIDEBAR_WIDTH: f32 = 244.0;
 const QUEUE_WIDTH: f32 = 336.0;
 const QUEUE_MIN_WINDOW: f32 = 1140.0;
-const BAR_HEIGHT: f32 = 84.0;
+const BAR_HEIGHT: f32 = 116.0;
 const ACCOUNT_HEIGHT: f32 = 68.0;
 const UPDATE_HEIGHT: f32 = 50.0;
 const TOPBAR_HEIGHT: f32 = 68.0;
@@ -476,7 +476,7 @@ pub fn draw(app: &mut App, ctx: &egui::Context) -> Vec<Action> {
     let mut out = Vec::new();
     let plain = |fill: Color32| Frame::new().fill(fill);
     let scrub = egui::TopBottomPanel::bottom("player")
-        .exact_height(BAR_HEIGHT)
+        .exact_height(if app.saved.stats.enabled { BAR_HEIGHT } else { 84.0 })
         .show_separator_line(false)
         .frame(plain(PANEL))
         .show(ctx, |ui| player_bar(app, ui, &mut out))
@@ -1751,6 +1751,8 @@ fn account(app: &App, ui: &Ui, foot: Rect, out: &mut Vec<Action>) {
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
         .show(|ui| {
             ui.set_width(MENU_WIDTH);
+            stats_options(app, ui, out);
+            menu_divider(ui);
             if switch_row(ui, icon::DISCORD_LOGO, "Show on Discord", app.saved.discord) {
                 out.push(Action::ShowOnDiscord(!app.saved.discord));
             }
@@ -2296,7 +2298,7 @@ fn now_playing(app: &App, ui: &mut Ui, out: &mut Vec<Action>) -> Color32 {
 
 fn player_bar(app: &App, ui: &mut Ui, out: &mut Vec<Action>) -> Scrub {
     let bar = ui.max_rect();
-    let mid = bar.center().y + 3.0;
+    let mid = bar.top() + 45.0;
     let duration = app.player.duration_ms();
     let item = app.now_playing();
     let backdrop = ui.interact(bar, Id::new("bar-backdrop"), Sense::click());
@@ -2550,7 +2552,126 @@ fn player_bar(app: &App, ui: &mut Ui, out: &mut Vec<Action>) -> Scrub {
         let time = format!("{}  /  {}", clock(position), clock(duration));
         label(ui, pos2(right, mid), Align2::RIGHT_CENTER, &time, sans(12.5), MUTED, 140.0);
     }
+    audio_stats(app, ui, out, bar);
     scrub
+}
+
+fn stats_options(app: &App, ui: &mut Ui, out: &mut Vec<Action>) {
+    let mut options = app.saved.stats.clone();
+    if switch_row(ui, icon::WAVEFORM, "Estadísticas de audio", options.enabled) {
+        options.enabled = !options.enabled;
+    }
+    if options.enabled {
+        for (name, selected) in [
+            ("Bitrate", &mut options.bitrate),
+            ("Muestreo (kHz)", &mut options.sample_rate),
+            ("Canales", &mut options.channels),
+            ("Máxima AAC", &mut options.maximum),
+            ("Buffer descargado", &mut options.buffer),
+        ] {
+            if switch_row(ui, icon::CHECK, name, *selected) {
+                *selected = !*selected;
+            }
+        }
+    }
+    if options != app.saved.stats {
+        out.push(Action::Stats(options));
+    }
+}
+
+fn audio_stats(app: &App, ui: &mut Ui, out: &mut Vec<Action>, bar: Rect) {
+    if !app.saved.stats.enabled {
+        return;
+    }
+    let stats = app.player.stats();
+    let options = &app.saved.stats;
+    let mut fields = Vec::new();
+    let (symbol, color) = match &stats {
+        Some(stats) => {
+            fields.push("AAC".to_owned());
+            if options.bitrate {
+                fields.push(stats.bitrate.map_or("— kbps".into(), |n| format!("{} kbps", (n + 500) / 1000)));
+            }
+            if options.sample_rate {
+                fields.push(
+                    stats
+                        .sample_rate
+                        .map_or("— kHz".into(), |n| format!("{:.1} kHz", n as f32 / 1000.0)),
+                );
+            }
+            if options.channels {
+                fields.push(match stats.channels {
+                    Some(1) => "Mono".into(),
+                    Some(2) => "Estéreo".into(),
+                    Some(n) => format!("{n} canales"),
+                    None => "— canales".into(),
+                });
+            }
+            if options.maximum {
+                fields.push(stats.status().to_owned());
+            }
+            if options.buffer {
+                fields.push(format!("Buffer {:.0}%", app.player.buffered() * 100.0));
+            }
+            match (options.maximum, stats.maximum()) {
+                (true, Some(true)) => (icon::CHECK_CIRCLE, rgb(0x83D9B0)),
+                (true, Some(false)) => (icon::ARROW_CIRCLE_UP, rgb(0xE6BA75)),
+                _ => (icon::WAVEFORM, MUTED),
+            }
+        }
+        None => {
+            fields.push(
+                if app.player.loading() {
+                    "Consultando calidad…"
+                } else {
+                    "Calidad sin verificar"
+                }
+                .to_owned(),
+            );
+            (icon::WAVEFORM, FAINT)
+        }
+    };
+    let text = fields.join("  ·  ");
+    let galley = fit(ui, &text, medium(11.5), color, bar.width() - 100.0, 1);
+    let rect = Rect::from_center_size(pos2(bar.center().x, bar.bottom() - 18.0), vec2(galley.size().x + 46.0, 27.0));
+    let response = ui.interact(rect, Id::new("audio-stats"), Sense::click());
+    let hover = hover_of(ui, &response);
+    ui.painter().rect(
+        rect,
+        14.0,
+        color.gamma_multiply(0.07 + hover * 0.04),
+        Stroke::new(1.0, color.gamma_multiply(0.18)),
+        StrokeKind::Inside,
+    );
+    ui.painter().text(
+        pos2(rect.left() + 16.0, rect.center().y),
+        Align2::CENTER_CENTER,
+        symbol,
+        glyph(14.0),
+        color,
+    );
+    ui.painter()
+        .galley(pos2(rect.left() + 30.0, rect.center().y - galley.size().y / 2.0), galley, color);
+    describe(&response, &format!("Estadísticas de audio: {text}. Configurar y copiar"));
+    egui::Popup::menu(&response)
+        .align(egui::RectAlign::TOP_START)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        .show(|ui| {
+            ui.set_width(MENU_WIDTH);
+            ui.add(egui::Label::new(RichText::new("Audio en reproducción").font(bold(15.0)).color(TEXT)).selectable(true));
+            ui.add_space(8.0);
+            ui.add(egui::Label::new(RichText::new(&text).color(color)).selectable(true));
+            if let Some(stats) = &stats {
+                let highest = stats.max_bitrate.map_or("sin verificar".into(), |n| format!("{} kbps", (n + 500) / 1000));
+                ui.add(egui::Label::new(RichText::new(format!("Máxima AAC anunciada: {highest}")).color(MUTED)).selectable(true));
+            }
+            ui.add(egui::Label::new(RichText::new("Compara bitrate entre los formatos AAC anunciados en la respuesta del reproductor, que consulta sin cookies. No verifica otros códecs ni calidades Premium.").size(11.5).color(MUTED)).wrap());
+            if menu_row(ui, icon::COPY, glyph(16.0), MUTED, "Copiar estadísticas").clicked() {
+                ui.ctx().copy_text(text.clone());
+            }
+            menu_divider(ui);
+            stats_options(app, ui, out);
+        });
 }
 
 fn paint_scrubber(ctx: &egui::Context, scrub: &Scrub) {
@@ -2578,7 +2699,10 @@ fn notice(app: &App, ctx: &egui::Context, out: &mut Vec<Action>) {
     let Some(notice) = &app.notice else { return };
     egui::Area::new(Id::new("notice"))
         .order(egui::Order::Foreground)
-        .anchor(Align2::CENTER_BOTTOM, vec2(0.0, -(BAR_HEIGHT + 22.0)))
+        .anchor(
+            Align2::CENTER_BOTTOM,
+            vec2(0.0, -(if app.saved.stats.enabled { BAR_HEIGHT } else { 84.0 } + 22.0)),
+        )
         .interactable(notice.action.is_some())
         .show(ctx, |ui| {
             let text = fit(ui, &notice.text, medium(13.5), PANEL, 420.0, 2);

@@ -1,4 +1,5 @@
 use crate::auth;
+use crate::stats::AudioStats;
 use serde::de::{DeserializeSeed, Deserializer, IgnoredAny, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -124,10 +125,12 @@ impl Page {
     }
 }
 
+#[derive(Clone)]
 pub struct Stream {
     pub url: String,
     pub len: u64,
     pub duration_ms: u64,
+    pub stats: AudioStats,
 }
 
 #[derive(Debug, PartialEq)]
@@ -757,12 +760,36 @@ fn audio(response: &Value) -> Option<Stream> {
         .as_array()
         .filter(|_| playable(response))?;
     let format = formats.iter().find(|f| f["itag"].as_u64() == Some(AAC_ITAG))?;
-    let number = |key: &str| format[key].as_str().and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
+    let number = |key: &str| audio_number(format, key).unwrap_or(0);
+    let aac = |f: &&Value| {
+        f["itag"].as_u64() == Some(AAC_ITAG)
+            || f["mimeType"]
+                .as_str()
+                .is_some_and(|mime| mime.starts_with("audio/mp4") && mime.contains("mp4a"))
+    };
+    let bitrates: Option<Vec<u64>> = formats.iter().filter(aac).map(audio_bitrate).collect();
     Some(Stream {
         url: format["url"].as_str()?.to_owned(),
         len: number("contentLength"),
         duration_ms: number("approxDurationMs"),
+        stats: AudioStats {
+            bitrate: audio_bitrate(format),
+            max_bitrate: bitrates.and_then(|rates| rates.into_iter().max()),
+            sample_rate: audio_number(format, "audioSampleRate").and_then(|n| n.try_into().ok()),
+            channels: audio_number(format, "audioChannels").and_then(|n| n.try_into().ok()),
+        },
     })
+}
+
+fn audio_number(format: &Value, key: &str) -> Option<u64> {
+    format[key]
+        .as_u64()
+        .or_else(|| format[key].as_str()?.parse().ok())
+        .filter(|n| *n > 0)
+}
+
+fn audio_bitrate(format: &Value) -> Option<u64> {
+    audio_number(format, "averageBitrate").or_else(|| audio_number(format, "bitrate"))
 }
 
 fn describe(error: ureq::Error) -> String {
@@ -1046,6 +1073,54 @@ fn thumb(node: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn audio_response(formats: Value) -> Value {
+        json!({"playabilityStatus": {"status": "OK"}, "streamingData": {"adaptiveFormats": formats}})
+    }
+
+    #[test]
+    fn quality_uses_actual_metadata_and_compares_only_aac() {
+        let response = audio_response(json!([
+            {"itag": 140, "url": "https://example.test/audio", "mimeType": "audio/mp4; codecs=\"mp4a.40.2\"", "averageBitrate": 129050, "audioSampleRate": "44100", "audioChannels": 2, "contentLength": "1000", "approxDurationMs": "2000"},
+            {"itag": 251, "mimeType": "audio/webm; codecs=\"opus\"", "bitrate": 160000},
+            {"itag": 141, "mimeType": "audio/mp4; codecs=\"mp4a.40.2\"", "bitrate": 256000}
+        ]));
+        let stream = audio(&response).unwrap();
+        assert_eq!((stream.len, stream.duration_ms), (1000, 2000));
+        assert_eq!(stream.stats.bitrate, Some(129050));
+        assert_eq!(stream.stats.sample_rate, Some(44100));
+        assert_eq!(stream.stats.channels, Some(2));
+        assert_eq!(stream.stats.maximum(), Some(false));
+    }
+
+    #[test]
+    fn another_codec_does_not_make_a_false_bitrate_comparison() {
+        let response = audio_response(json!([
+            {"itag": 140, "url": "https://example.test/audio", "bitrate": 128000},
+            {"itag": 251, "mimeType": "audio/webm; codecs=\"opus\"", "bitrate": 160000}
+        ]));
+        assert_eq!(audio(&response).unwrap().stats.maximum(), Some(true));
+    }
+
+    #[test]
+    fn incomplete_or_zero_bitrates_cannot_verify_maximum() {
+        for extra in [
+            json!({"mimeType": "audio/mp4; codecs=\"mp4a.40.2\""}),
+            json!({"mimeType": "audio/mp4; codecs=\"mp4a.40.2\"", "bitrate": 0}),
+        ] {
+            let response = audio_response(json!([
+                {"itag": 140, "url": "https://example.test/audio", "bitrate": 128000}, extra
+            ]));
+            assert_eq!(audio(&response).unwrap().stats.maximum(), None);
+        }
+    }
+
+    #[test]
+    fn blocked_playback_does_not_report_audio_stats() {
+        let mut response = audio_response(json!([{"itag": 140, "url": "https://example.test/audio", "bitrate": 128000}]));
+        response["playabilityStatus"]["status"] = "ERROR".into();
+        assert!(audio(&response).is_none());
+    }
 
     #[test]
     fn ends_only_the_session_that_youtube_rejected() {

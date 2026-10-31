@@ -80,6 +80,7 @@ pub struct Saved {
     pub discord: bool,
     pub discord_headline: Headline,
     pub discord_name: String,
+    pub stats: crate::stats::StatsOptions,
 }
 
 pub enum Words {
@@ -147,6 +148,7 @@ impl Default for Saved {
             discord: false,
             discord_headline: Headline::App,
             discord_name: String::new(),
+            stats: crate::stats::StatsOptions::default(),
         }
     }
 }
@@ -199,6 +201,7 @@ pub enum Action {
     ShowOnDiscord(bool),
     DiscordHeadline(Headline),
     DiscordName(String),
+    Stats(crate::stats::StatsOptions),
 }
 
 enum Event {
@@ -952,6 +955,7 @@ impl App {
                 self.discord = shown.then(|| link_discord(&self.sender, &self.ctx));
             }
             Action::DiscordHeadline(headline) => self.saved.discord_headline = headline,
+            Action::Stats(options) => self.saved.stats = options,
             Action::DiscordName(name) => {
                 self.saved.discord_name = name;
                 self.saved.discord_headline = Headline::Custom;

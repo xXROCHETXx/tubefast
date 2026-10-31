@@ -30,7 +30,7 @@ const NO_OUTPUT: &str = "No audio output device was found";
 
 type Wake = Arc<dyn Fn() + Send + Sync>;
 type Chunks = Arc<Mutex<Receiver<Chunk>>>;
-type Urls = Arc<Mutex<HashMap<String, (Instant, String, u64, u64)>>>;
+type Urls = Arc<Mutex<HashMap<String, (Instant, ytm::Stream)>>>;
 
 #[derive(Default)]
 struct Shared {
@@ -42,6 +42,18 @@ struct Shared {
     loading: AtomicBool,
     ended: AtomicBool,
     error: Mutex<Option<String>>,
+    stats: Mutex<Option<(u64, crate::stats::AudioStats)>>,
+}
+
+impl Shared {
+    fn audio_stats(&self) -> Option<crate::stats::AudioStats> {
+        self.stats
+            .lock()
+            .unwrap()
+            .as_ref()
+            .filter(|(generation, _)| *generation == self.generation.load(Relaxed))
+            .map(|(_, stats)| stats.clone())
+    }
 }
 
 struct Chunk {
@@ -240,16 +252,17 @@ struct Track {
     id: u32,
     time_base: Option<TimeBase>,
     finished: bool,
+    stats: crate::stats::AudioStats,
 }
 
 impl Track {
     fn open(yt: &ytm::Client, urls: &Urls, video_id: &str, generation: u64, shared: &Arc<Shared>) -> Result<Track, String> {
-        let (url, len, duration_ms) = resolve(yt, urls, video_id)?;
+        let stream = resolve(yt, urls, video_id)?;
         if shared.generation.load(Relaxed) == generation {
-            shared.duration_ms.store(duration_ms, Relaxed);
+            shared.duration_ms.store(stream.duration_ms, Relaxed);
         }
         let seekable = Arc::new(AtomicBool::new(false));
-        let fetch = Fetch::start(yt, url, len, generation, shared.clone());
+        let fetch = Fetch::start(yt, stream.url, stream.len, generation, shared.clone());
         let reader = Reader {
             fetch,
             at: 0,
@@ -265,6 +278,13 @@ impl Track {
         seekable.store(true, Relaxed);
         let track = format.default_track().ok_or("This stream has no audio track")?;
         let (id, time_base) = (track.id, track.codec_params.time_base);
+        let mut stats = stream.stats;
+        stats.sample_rate = track.codec_params.sample_rate.or(stats.sample_rate);
+        stats.channels = track
+            .codec_params
+            .channels
+            .map(|channels| channels.count() as u16)
+            .or(stats.channels);
         let decoder = symphonia::default::get_codecs()
             .make(&track.codec_params, &DecoderOptions::default())
             .map_err(|e| e.to_string())?;
@@ -276,6 +296,7 @@ impl Track {
             id,
             time_base,
             finished: false,
+            stats,
         })
     }
 
@@ -329,22 +350,19 @@ impl Track {
     }
 }
 
-fn resolve(yt: &ytm::Client, urls: &Urls, video_id: &str) -> Result<(String, u64, u64), String> {
-    if let Some((at, url, len, duration_ms)) = urls.lock().unwrap().get(video_id)
+fn resolve(yt: &ytm::Client, urls: &Urls, video_id: &str) -> Result<ytm::Stream, String> {
+    if let Some((at, stream)) = urls.lock().unwrap().get(video_id)
         && at.elapsed() < URL_LIFETIME
     {
-        return Ok((url.clone(), *len, *duration_ms));
+        return Ok(stream.clone());
     }
     let stream = yt.stream(video_id)?;
     let mut urls = urls.lock().unwrap();
     if urls.len() >= URL_CACHE_ENTRIES {
         urls.clear();
     }
-    urls.insert(
-        video_id.to_owned(),
-        (Instant::now(), stream.url.clone(), stream.len, stream.duration_ms),
-    );
-    Ok((stream.url, stream.len, stream.duration_ms))
+    urls.insert(video_id.to_owned(), (Instant::now(), stream.clone()));
+    Ok(stream)
 }
 
 struct PcmSource {
@@ -495,6 +513,7 @@ fn decode_loop(
                 });
             }
             Some(Cmd::Opened(mut opened)) if current(opened.generation) => {
+                *shared.stats.lock().unwrap() = Some((opened.generation, opened.stats.clone()));
                 if let Some(ms) = resume.take() {
                     opened.seek(ms);
                 }
@@ -641,6 +660,7 @@ impl Player {
         self.shared.ended.store(false, Relaxed);
         self.shared.loading.store(true, Relaxed);
         self.shared.error.lock().unwrap().take();
+        self.shared.stats.lock().unwrap().take();
         let _ = self.commands.send(Cmd::Load {
             video_id: video_id.to_owned(),
             generation,
@@ -694,12 +714,20 @@ impl Player {
         self.shared.loading.load(Relaxed)
     }
 
+    pub fn stats(&self) -> Option<crate::stats::AudioStats> {
+        self.shared.audio_stats()
+    }
+
     pub fn take_ended(&self) -> bool {
         self.shared.ended.swap(false, Relaxed)
     }
 
     pub fn take_error(&self) -> Option<String> {
-        self.shared.error.lock().unwrap().take()
+        let error = self.shared.error.lock().unwrap().take();
+        if error.is_some() {
+            self.shared.stats.lock().unwrap().take();
+        }
+        error
     }
 }
 
@@ -740,18 +768,44 @@ pub fn selftest(query: &str) -> Result<String, String> {
         }
     }
     Ok(format!(
-        "ok: \"{}\" by {} | search {searched:.0?} | open {opened:.0?} | {rate} Hz, peak {peak:.2} | seeks to 60s, 5s, {}s, 5s in {:.0?} | radio {} tracks | duration {duration} ms",
+        "ok: \"{}\" by {} | search {searched:.0?} | open {opened:.0?} | {rate} Hz, peak {peak:.2} | seeks to 60s, 5s, {}s, 5s in {:.0?} | radio {} tracks | duration {duration} ms | AAC bitrate {:?} bps, maximum {:?} bps, {}",
         song.title,
         song.subtitle,
         far / 1000,
         seeking.elapsed(),
         radio.len(),
+        track.stats.bitrate,
+        track.stats.max_bitrate,
+        track.stats.status(),
     ))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn late_stats_from_a_previous_track_are_never_displayed() {
+        let shared = Shared::default();
+        *shared.stats.lock().unwrap() = Some((
+            0,
+            crate::stats::AudioStats {
+                bitrate: Some(128_000),
+                ..Default::default()
+            },
+        ));
+        assert_eq!(shared.audio_stats().unwrap().bitrate, Some(128_000));
+        shared.generation.store(1, Relaxed);
+        assert!(shared.audio_stats().is_none());
+        *shared.stats.lock().unwrap() = Some((
+            1,
+            crate::stats::AudioStats {
+                bitrate: Some(256_000),
+                ..Default::default()
+            },
+        ));
+        assert_eq!(shared.audio_stats().unwrap().bitrate, Some(256_000));
+    }
 
     #[test]
     fn a_reopened_output_keeps_playing_the_queued_audio() {

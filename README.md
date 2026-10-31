@@ -1,3 +1,18 @@
+## Tubefast Stats — fork
+
+Fork de [yigitbozyaka/tubefast](https://github.com/yigitbozyaka/tubefast) con una franja compacta de estadísticas reales del audio. Conserva el reproductor y su interfaz.
+
+- Pulsa la pastilla debajo de los controles para elegir bitrate, frecuencia, canales, indicador de máxima AAC y buffer. También puedes configurarlos desde el engranaje.
+- Verde con check: el bitrate actual es el máximo AAC anunciado. Ámbar con flecha: se anuncia un AAC superior. Gris: faltan datos para verificarlo. El texto explica el estado sin depender del color.
+- El panel permite seleccionar y copiar el texto. Las preferencias se guardan entre ejecuciones.
+- La información acompaña al stream en caché y se reinicia al cambiar de pista; una precarga no sustituye las estadísticas del audio actual.
+- El formato reproducido sigue siendo el AAC itag 140 del original. Este fork no agrega selección ni desbloqueo de calidad. El indicador compara bitrate entre AAC de la respuesta recibida, no entre códecs distintos ni contra todo el catálogo de YouTube. El endpoint de reproducción del original consulta sin cookies incluso con una cuenta conectada: no puede certificar la máxima calidad Premium.
+- Usa el nombre **Tubefast Stats** y datos separados (`tubefast-stats`) para convivir con el original. El actualizador apunta a este fork.
+
+Revisión de autenticación y límites: [AUTH-REVIEW.es.md](AUTH-REVIEW.es.md).
+
+El resto de este documento es la documentación del proyecto original.
+
 <p align="center">
   <img src="assets/logo.svg" alt="Tubefast logo" width="88" height="88">
 </p>
